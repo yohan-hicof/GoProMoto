@@ -464,7 +464,7 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
     cap.release();
 
     speed_overlay speed;
-    create_speed_meter(speed, frame_height / 3, frame_height / 3);
+    create_speed_meter(speed, frame_height/4, frame_height/4);
     //display_speed(speed, static_cast<double> (i));
     extracted_data data;
     gps_data gps;
@@ -472,6 +472,9 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
     //Extract the data from the videos
     for (auto path: paths_in)
         get_mp4_data(path.c_str(), data);
+        
+    write_mp4_all_metadata("./metadata.csv", data, 500);
+    //exit(0);
 
     //Extract the information of the track for the lap-time and intermediates times.
     if (overlay_track_time) {
@@ -480,7 +483,7 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
     }
 
     //Create the object with the track overlay
-    if (!create_gps_object(gps, data, frame_width / 3, frame_height / 3)){
+    if (!create_gps_object(gps, data, frame_width/3, frame_height/3)){
         overlay_track = false;
         overlay_speed = false;
     }
@@ -541,7 +544,7 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
                 sub_frame = frame(cv::Rect(100, frame.rows-speed.curr_speed.rows-20,
                                            speed.curr_speed.cols, speed.curr_speed.rows));
                 display_position_gps(gps, data, start_index);
-                cv::addWeighted(sub_frame, .7, speed.curr_speed, 1.0, 0.0, sub_frame);
+                cv::addWeighted(sub_frame, .5, speed.curr_speed, 1.0, 0.0, sub_frame);
             }
             //cv::imshow("frame", frame);
             //cv::waitKey();

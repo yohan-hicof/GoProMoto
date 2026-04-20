@@ -151,6 +151,30 @@ void write_mp4_metadata(const string filename, extracted_data &data){
 
 }
 
+void write_mp4_all_metadata(const string filename, extracted_data &data, size_t nb_data_points){
+
+    if (nb_data_points == 0) nb_data_points = data.gps_lat.size();
+
+    ofstream file(filename);
+
+    file << "Framerate: " << data.framerate << "\n";
+    file << "Nb Frames: " << data.nb_frames << "\n";
+
+    file << "---GPS---\n";
+    file << "GPS start: " << data.gps_start << "\n";
+    file << "GPS end: " << data.gps_end << "\n";
+    file << "GPS lat, long, alt, speed, speed2, accl_x, accl_y, accl_z, gyro_x, gyro_y, gyro_z" << "\n";
+    for (size_t i = 0; i < nb_data_points; i++){
+        file << data.gps_lat[i] <<","<< data.gps_long[i] <<","<< data.gps_alt[i] <<",";
+        file << data.gps_speed[i] <<","<< data.gps_speed2[i];
+        file << "," << data.accl_x[i] << "," << data.accl_y[i] << "," << data.accl_z[i];
+        file << "," << data.gyro_x[i] << "," << data.gyro_y[i] << "," << data.gyro_z[i] <<"\n";
+    }
+    //TODO The same with the other data when I need to debug them.
+    file.close();
+
+}
+
 GPMF_ERR GetGPSMP4File(const char* filename, extracted_data &data){
 	GPMF_ERR ret = GPMF_OK;
 	GPMF_stream metadata_stream = { 0 }, * ms = &metadata_stream;

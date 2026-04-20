@@ -58,7 +58,7 @@ void extract_lap_info(const string filename, const extracted_data &data, laps_da
         return;
     }
     //Get the average lat/long to find the proper track
-    double ave_lat = 0.0, ave_long = 0.0;
+    double ave_lat = 0.0, ave_long = 0.0, max_distance = 20.0;
     for (auto l:data.gps_lat) ave_lat += l;
     for (auto l:data.gps_long) ave_long += l;
     ave_lat /= data.gps_lat.size();
@@ -101,14 +101,14 @@ void extract_lap_info(const string filename, const extracted_data &data, laps_da
     }
 
     //Compute each lap time and its intermediate values.
-    vector<size_t> list_finish = find_coordinates(data, laps.finish_lat, laps.finish_long, 10, 0, 0);
+    vector<size_t> list_finish = find_coordinates(data, laps.finish_lat, laps.finish_long, max_distance, 0, 0);
     for (size_t i = 1; i < list_finish.size(); i++){
         single_lap curr_lap;
         curr_lap.list_index.emplace_back(list_finish[i-1]);
         for (size_t j = 0; j < laps.intermediate_lat.size(); j++){
             //This vector should contain a single value
             vector<size_t> list_inter = find_coordinates(data, laps.intermediate_lat[j], laps.intermediate_long[j],
-                                                         10, list_finish[i-1], list_finish[i]);
+                                                         max_distance, list_finish[i-1], list_finish[i]);
             if (!list_inter.empty()) curr_lap.list_index.emplace_back(list_inter[0]);
         }
         curr_lap.list_index.emplace_back(list_finish[i]);
@@ -128,7 +128,7 @@ void extract_lap_info(const string filename, const extracted_data &data, laps_da
     }
 
     for (auto lap:laps.list_laps){
-        cout << "Lap time: " << lap.lap_time << "\n";
+        cout << "Lap time: " << lap.lap_time << " -> ";
         for (auto t: lap.intermediate_time){
             cout << "|" << t;
         }

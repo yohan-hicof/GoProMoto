@@ -40,7 +40,7 @@ void concatenate_audio_video(const char* video_file, const char* audio_file, con
         std::cerr << "Could not create output context." << std::endl;
         exit(1);
     }
-    output_fmt = output_fmt_ctx->oformat;
+    //output_fmt = output_fmt_ctx->oformat;
 
     // Find video and audio streams
     for (unsigned i = 0; i < video_fmt_ctx->nb_streams; i++) {
@@ -72,7 +72,8 @@ void concatenate_audio_video(const char* video_file, const char* audio_file, con
     }
 
     // Open output file
-    if (!(output_fmt->flags & AVFMT_NOFILE)) {
+    //if (!(output_fmt->flags & AVFMT_NOFILE)) {
+    if (!(output_fmt_ctx->oformat->flags & AVFMT_NOFILE)) {
         if (avio_open(&output_fmt_ctx->pb, output_file, AVIO_FLAG_WRITE) < 0) {
             std::cerr << "Could not open output file." << std::endl;
             exit(1);
@@ -120,7 +121,8 @@ void concatenate_audio_video(const char* video_file, const char* audio_file, con
     av_packet_free(&pkt);
     avformat_close_input(&video_fmt_ctx);
     avformat_close_input(&audio_fmt_ctx);
-    if (!(output_fmt->flags & AVFMT_NOFILE)) {
+    //if (!(output_fmt->flags & AVFMT_NOFILE)) {
+    if (!(output_fmt_ctx->oformat->flags & AVFMT_NOFILE)) {
         avio_closep(&output_fmt_ctx->pb);
     }
     avformat_free_context(output_fmt_ctx);

@@ -273,7 +273,8 @@ void create_speed_meter(speed_overlay &speed, const size_t width, const size_t h
     cv::resize(blank_digit, blank_digit, cv::Size(0,0), r, r);
     for (int i = 0; i < 10; i++){
         cv::Mat curr_digit = blank_digit.clone();
-        fill_digit(curr_digit, i, cv::Scalar(23,101,232, 255));
+        // fill_digit(curr_digit, i, cv::Scalar(23,101,232, 255));
+        fill_digit(curr_digit, i, cv::Scalar(5,10,200, 255));
         cv::cvtColor(curr_digit, curr_digit, cv::COLOR_BGR2BGRA); //Cannot do that before because floodfill
         speed.list_digits.emplace_back(curr_digit);
     }
@@ -294,6 +295,7 @@ void display_speed(speed_overlay &speed, double v){
     p1.x = 0.70*speed.radius * cos(rad) + speed.centre.x;
     p1.y = 0.70*speed.radius * sin(rad) + speed.centre.y;
 
+    //Add the line for the speed
     cv::Scalar color(255,255,255,255);
     int thickness = max(3, min(speed.curr_speed.rows, speed.curr_speed.cols)/100);
     cv::line(speed.curr_speed, p1, p2, color, thickness);
