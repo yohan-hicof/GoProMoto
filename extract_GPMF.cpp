@@ -130,6 +130,50 @@ void correct_gps_data(extracted_data &data){
 
 }
 
+void average_imu_data(extracted_data &data, int window_size=5){
+    //Average the accl and gyro data over a window. The window should be an odd value
+    //Use the following coefficient [1/k,2/k,..., 1 ,k-1/k,k-2/k,...1/k] with k = floor(window_size/2)
+    
+    if (window_size <= 0 || window_size%2 == 0){
+        cerr << "Error in " << __FUNCTION__ << " invalid window size" << endl;
+        return;
+    }
+    
+    int half_window = window_size/2;
+    vector<double> coefs(half_window,1.0);
+    double sum_coef = 1.0;
+    
+    for (int i = 0; i < half_window; i++){
+    	coefs[i] = static_cast<double>(i)/static_cast<double>(half_window);
+    	sum_coef += 2*coefs[i];
+    }
+    
+    //Create copy of the vectors to smooth
+    std::vector<double> accl_x=data.accl_x, accl_y=data.accl_y, accl_z=data.accl_z;
+    std::vector<double> gyro_x=data.gyro_x, gyro_y=data.gyro_y, gyro_z=data.gyro_z;
+    
+    for (size_t i = half_window+1; i < accl_x.size()-half_window-1; i++){
+        double ax = accl_x[i+half_window], ay = accl_y[i+half_window], az = accl_z[i+half_window];
+        double gx = gyro_x[i+half_window], gy = gyro_y[i+half_window], gz = gyro_z[i+half_window];
+        for (size_t j = 0; j < half_windows; j++){
+            ax += (accl_x[i+half_window+j]+accl_x[i+j])*coefs[j];
+            ay += (accl_y[i+half_window+j]+accl_y[i+j])*coefs[j];
+            az += (accl_z[i+half_window+j]+accl_z[i+j])*coefs[j];
+            
+            gx += (gyro_x[i+half_window+j]+gyro_x[i+j])*coefs[j];
+            gy += (gyro_y[i+half_window+j]+gyro_y[i+j])*coefs[j];
+            gz += (gyro_z[i+half_window+j]+gyro_z[i+j])*coefs[j];        
+        }
+        ax /= sum_coef; ay /= sum_coef; az /= sum_coef;
+        gx /= sum_coef; gy /= sum_coef; gz /= sum_coef;
+    	//Update the value on the final vector
+    	data.accl_x[i+half_window] = ax; data.accl_y[i+half_window] = ay; data.accl_z[i+half_window] = az;
+        data.gyro_x[i+half_window] = gx; data.gyro_y[i+half_window] = gy; data.gyro_z[i+half_window] = gz;    	
+    }   
+
+
+}
+
 void write_mp4_metadata(const string filename, extracted_data &data){
 
     ofstream file(filename);
@@ -153,20 +197,34 @@ void write_mp4_metadata(const string filename, extracted_data &data){
 
 void write_mp4_all_metadata(const string filename, extracted_data &data, size_t nb_data_points){
 
+    // Add all the information, not just these one.
     if (nb_data_points == 0) nb_data_points = data.gps_lat.size();
 
     ofstream file(filename);
 
-    file << "Framerate: " << data.framerate << "\n";
-    file << "Nb Frames: " << data.nb_frames << "\n";
+    //First show all the important values and units
+    file << "Framerate,Nb Frames\n"; 
+    file << data.framerate << "," << data.nb_frames << "\n"; 
+    file << "---GPS---,start,end,lat unit,lon unit,alt unit,speed unit,speed2 unit,rate\n,";
+    file << data.gps_start << "," << data.gps_end;
+    file << "," << data.gps_lat_unit << "," << data.gps_long_unit << "," << data.gps_alt_unit;
+    file << "," << data.gps_speed_unit << "," << data.gps_speed2_unit << "," << data.gpsrate << "\n";
 
-    file << "---GPS---\n";
-    file << "GPS start: " << data.gps_start << "\n";
-    file << "GPS end: " << data.gps_end << "\n";
-    file << "GPS lat, long, alt, speed, speed2, accl_x, accl_y, accl_z, gyro_x, gyro_y, gyro_z" << "\n";
+    file << "---ACCl---,start,end,X unit,Y unit,Z unit,rate\n,";
+    file << data.accl_start << "," << data.accl_end;
+    file << "," << data.accl_x_unit << "," << data.accl_y_unit << "," << data.accl_z_unit;
+    file << "," << data.acclrate << "\n";
+    
+    file << "---GYRO---,start,end,X unit,Y unit,Z unit,rate\n,";
+    file << data.gyro_start << "," << data.gyro_end;
+    file << "," << data.gyro_x_unit << "," << data.gyro_y_unit << "," << data.gyro_z_unit;
+    file << "," << data.gyrorate << "\n";
+
+    //Now the data themselves
+    file << "GPS lat, long, alt, speed, speed2, GPS ts, accl_x, accl_y, accl_z, gyro_x, gyro_y, gyro_z" << "\n";
     for (size_t i = 0; i < nb_data_points; i++){
         file << data.gps_lat[i] <<","<< data.gps_long[i] <<","<< data.gps_alt[i] <<",";
-        file << data.gps_speed[i] <<","<< data.gps_speed2[i];
+        file << data.gps_speed[i] <<","<< data.gps_speed2[i] << "," << data.gps_ts[i];
         file << "," << data.accl_x[i] << "," << data.accl_y[i] << "," << data.accl_z[i];
         file << "," << data.gyro_x[i] << "," << data.gyro_y[i] << "," << data.gyro_z[i] <<"\n";
     }
@@ -289,6 +347,8 @@ GPMF_ERR GetGPSMP4File(const char* filename, extracted_data &data){
 							data.gps_alt.emplace_back(*ptr++);
 							data.gps_speed.emplace_back(*ptr++);
 							data.gps_speed2.emplace_back(*ptr++);
+							
+							data.gps_ts.emplace_back(in+i*(out-in)/samples);
 							/*printf("--%.3f%s, ", data.gps_lat.back(), units[0 % unit_samples]);
 							printf("--%.3f%s, ", data.gps_long.back(), units[1 % unit_samples]);
 							printf("--%.3f%s, ", data.gps_alt.back(), units[2 % unit_samples]);

@@ -40,10 +40,11 @@ void display_speed(speed_overlay &speed, double v);
 cv::Mat get_digit_image_from_h();
 void fill_digit(cv::Mat &to_fill, int digit, cv::Scalar color = cv::Scalar(23,201,232));
 
-void display_position_gps(gps_data &gps, extracted_data &data, int &index);
+void display_position_gps(gps_data &gps, extracted_data &data, double ts);
 bool create_gps_object(gps_data &gps, extracted_data &data, int nb_cols, int nb_rows);
 
 cv::Mat display_lap_time(laps_data &laps, size_t index);
+cv::Mat display_lap_time_ts(laps_data &laps, double start_ts);
 
 
 #endif //GOPROMOTO_OVERLAY_FUNCTIONS_H

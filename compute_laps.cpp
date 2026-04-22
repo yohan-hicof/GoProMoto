@@ -102,23 +102,29 @@ void extract_lap_info(const string filename, const extracted_data &data, laps_da
 
     //Compute each lap time and its intermediate values.
     vector<size_t> list_finish = find_coordinates(data, laps.finish_lat, laps.finish_long, max_distance, 0, 0);
+    vector<double> list_finish_ts = find_coordinates_ts(data, laps.finish_lat, laps.finish_long, max_distance, -100, -100);
     for (size_t i = 1; i < list_finish.size(); i++){
         single_lap curr_lap;
         curr_lap.list_index.emplace_back(list_finish[i-1]);
+        curr_lap.list_ts.emplace_back(list_finish_ts[i-1]);
         for (size_t j = 0; j < laps.intermediate_lat.size(); j++){
             //This vector should contain a single value
-            vector<size_t> list_inter = find_coordinates(data, laps.intermediate_lat[j], laps.intermediate_long[j],
-                                                         max_distance, list_finish[i-1], list_finish[i]);
+            vector<size_t> list_inter = find_coordinates(data, laps.intermediate_lat[j], laps.intermediate_long[j], max_distance, list_finish[i-1], list_finish[i]);
+            vector<double> list_inter_ts = find_coordinates_ts(data, laps.intermediate_lat[j], laps.intermediate_long[j], max_distance, list_finish_ts[i-1], list_finish_ts[i]);
             if (!list_inter.empty()) curr_lap.list_index.emplace_back(list_inter[0]);
+            if (!list_inter_ts.empty()) curr_lap.list_ts.emplace_back(list_inter_ts[0]);
         }
         curr_lap.list_index.emplace_back(list_finish[i]);
+        curr_lap.list_ts.emplace_back(list_finish_ts[i]);
         //Now compute the lap time and intermediate times.
-        curr_lap.lap_time = curr_lap.list_index.back() - curr_lap.list_index[0];
-        curr_lap.lap_time /= laps.gps_hz;
+        //curr_lap.lap_time = curr_lap.list_index.back() - curr_lap.list_index[0];
+        //curr_lap.lap_time /= laps.gps_hz;
+        curr_lap.lap_time = curr_lap.list_ts.back() - curr_lap.list_ts[0];
         for (size_t j = 1; j < curr_lap.list_index.size(); j++){
-            double t = curr_lap.list_index[j] - curr_lap.list_index[j-1];
-            t /= laps.gps_hz;
-            curr_lap.intermediate_time.emplace_back(t);
+            //double t = curr_lap.list_index[j] - curr_lap.list_index[j-1];
+            //t /= laps.gps_hz;
+            //curr_lap.intermediate_time.emplace_back(t);
+            curr_lap.intermediate_time.emplace_back(curr_lap.list_ts[j] - curr_lap.list_ts[j-1]);
         }
         //Generate the strings to be displayed
         curr_lap.s_lap_time = time_to_string(curr_lap.lap_time);
@@ -128,7 +134,7 @@ void extract_lap_info(const string filename, const extracted_data &data, laps_da
     }
 
     for (auto lap:laps.list_laps){
-        cout << "Lap time: " << lap.lap_time << " -> ";
+        cout << "Lap time: " << lap.s_lap_time << " -> ";
         for (auto t: lap.intermediate_time){
             cout << "|" << t;
         }
@@ -153,7 +159,7 @@ find_coordinates(const extracted_data &data, double &lat, double &lon, double ma
                  size_t end_index) {
     //Find the list of closest points to the given coordinates. The point have to be closer than max_dist (in meters)
     //We keep only local minimal. When we find one, the next one should be next lap.
-    // When we cross, we increase the index by 100 (a bit more than 5 seconds)
+    // When we cross, we increase the index by 100 (a bit more than 5 seconds, assuming 18pps, or 12s for 8pps)
 
     vector<size_t> result;
     double min_dist = max_dist;
@@ -171,6 +177,38 @@ find_coordinates(const extracted_data &data, double &lat, double &lon, double ma
         }
         else{// Getting away from the line.
             result.emplace_back(min_index);
+            min_dist = max_dist;
+            i+= 100;
+        }
+    }
+    return result;
+}
+
+vector<double> find_coordinates_ts(const extracted_data &data, double &lat, double &lon, double max_dist, double start_ts, size_t end_ts) {
+    //Find the list of closest points to the given coordinates. The point have to be closer than max_dist (in meters)
+    // We keep only local minimal. When we find one, the next one should be next lap.
+    // When we cross, we increase the ts by 5s to go to the next lap
+
+    vector<double> result;
+    double min_dist = max_dist, min_ts;
+    //Update the gps timestamp if needed
+    if (start_ts < -10) start_ts = data.gps_ts[0];
+    if (end_ts < -10) end_ts = data.gps_ts[data.gps_ts.size()-1];
+
+
+    for (size_t i = 0; i < data.gps_lat.size(); i++){
+        // Ensure we are in the proper range
+        if (data.gps_ts[i] < start_ts || data.gps_ts[i] > end_ts) continue;
+        double distance = haversine_meters(lat, lon, data.gps_lat[i], data.gps_long[i]);
+        if (distance > 20*max_dist) {i+=5; continue;}
+        if (distance > max_dist) continue;
+
+        if (distance < min_dist){//getting closer to the line;
+            min_dist = distance;
+            min_ts = data.gps_ts[i];
+        }
+        else{// Getting away from the line.
+            result.emplace_back(min_ts);
             min_dist = max_dist;
             i+= 100;
         }

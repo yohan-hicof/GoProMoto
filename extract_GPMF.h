@@ -40,7 +40,7 @@ struct extracted_data{ //Init the rate to -1 to know when not init.
     double acclrate = -1, accl_start, accl_end;
     double gyrorate = -1, gyro_start, gyro_end;
     double gpsrate = -1, gps_start, gps_end;
-    std::vector<double> gps_lat, gps_long, gps_alt, gps_speed, gps_speed2;
+    std::vector<double> gps_lat, gps_long, gps_alt, gps_speed, gps_speed2, gps_ts;
     string gps_lat_unit, gps_long_unit, gps_alt_unit, gps_speed_unit, gps_speed2_unit;
 
     std::vector<double> accl_x, accl_y, accl_z;
@@ -85,9 +85,10 @@ void write_mp4_metadata(const string filename, extracted_data &data);
 void write_mp4_all_metadata(const string filename, extracted_data &data, size_t nb_data_points=0);
 void correct_gps_data(extracted_data &data);
 bool create_gps_object(gps_data &gps, extracted_data &data, int nb_cols, int nb_rows);
-void display_position_gps(gps_data &gps, extracted_data &data, int &index);
 
 void convert_ms2kmh(extracted_data &data);
+
+void average_imu_data(extracted_data &data, int window_size=5);
 
 GPMF_ERR GetGPSMP4File(const char* filename, extracted_data &data);
 GPMF_ERR GetACCLMP4File(const char* filename, extracted_data &data);

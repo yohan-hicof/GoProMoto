@@ -106,42 +106,28 @@ bool create_gps_object(gps_data &gps, extracted_data &data, int nb_cols, int nb_
 }
 
 
-void display_position_gps(gps_data &gps, extracted_data &data, int &index) {
+void display_position_gps(gps_data &gps, extracted_data &data, double ts) {
 
     //First start from the base image.
     gps.position_map = gps.blank_map.clone();
 
-    if (static_cast<int>(data.gps_lat.size()) < index-1) {
-        //cerr << "Error index out of range, return" << endl;
-        return;
-    }
-    int x, y;
+    int x, y, index = 0;
+
+    //Find the closest position
+    while (data.gps_ts[index] < ts) {
+    	index++;
+    	if (index >= data.gps_ts.size()-1) break;
+    }    
     //Get the current position on the image
-#if 1
     if (gps.rotate_image) {
         x = static_cast<int>((data.gps_long[index] - gps.min_long) / gps.scaling) + gps.x_shift;
         y = gps.blank_map.rows - static_cast<int>((data.gps_lat[index] - gps.min_lat) / gps.scaling) - gps.y_shift;
     }
-    else{
-        //y = static_cast<int>((data.gps_long[index] - gps.min_long) / gps.scaling) + gps.y_shift;
-        //x = static_cast<int>((data.gps_lat[index] - gps.min_lat) / gps.scaling) + gps.x_shift;
+    else{        
         x = static_cast<int>((data.gps_long[index] - gps.min_long) / gps.scaling) + gps.y_shift;
         y = static_cast<int>((data.gps_lat[index] - gps.min_lat) / gps.scaling) + gps.x_shift;
 
     }
-#endif
-#if 0
-    if (gps.rotate_image) {
-        //y = gps.blank_map.rows - static_cast<int>((data.gps_long[index]-gps.min_long)/gps.scaling) - gps.y_shift;
-        y = static_cast<int>((data.gps_long[index]-gps.min_long)/gps.scaling) + gps.y_shift;
-        x = static_cast<int>((data.gps_lat[index]-gps.min_lat)/gps.scaling) + gps.x_shift;
-    }
-    else {
-        //y = gps.blank_map.rows - static_cast<int>((data.gps_lat[index]-gps.min_lat)/gps.scaling) - gps.y_shift;
-        y = static_cast<int>((data.gps_lat[index]-gps.min_lat)/gps.scaling) + gps.y_shift;
-        x = static_cast<int>((data.gps_long[index]-gps.min_long)/gps.scaling) + gps.x_shift;
-    }
-#endif
     cv::circle(gps.position_map, cv::Point(x, y), gps.position_circle, cv::Scalar(255,255,255,255), -1);
     cv::circle(gps.position_map, cv::Point(x, y), 2*gps.position_circle/3, cv::Scalar(255,0,0,255), -1);
 }
@@ -187,6 +173,79 @@ cv::Mat display_lap_time(laps_data &laps, size_t index){
                 current += lap.s_intermediate_time[i-1] + separator;
             else if(lap.list_index[i-1] < index) {// We started this section, but not finished yet
                 string curr_time = diff_index_to_string(lap.list_index[i-1], index, laps.gps_hz);
+                current += curr_time + separator;
+            }
+            else
+                current += unfinished + separator;
+        }
+        list_display.emplace_back(current);
+    }
+    //Find the best lap_time and update its color
+    if (finished_lap){
+        double best_time = list_lap_time[0];
+        size_t best_index = 0;
+        for (size_t i = 0; i < list_lap_time.size(); i++){
+            if (best_time > list_lap_time[i]){
+                best_time = list_lap_time[i];
+                best_index = i;
+            }
+        }
+        list_color[best_index] = color_best;
+    }
+    //Put the text onto the image.
+    for (size_t i = 0; i < list_display.size(); i++){
+        cv::putText(overlay, list_display[i], cv::Point(5, 50*i+50), cv::FONT_HERSHEY_DUPLEX, 1.5, list_color[i], 2);
+    }
+    //Crop the image to its minimal size
+    overlay = overlay(cv::Rect(cv::Point(0,0), cv::Point(overlay.cols, 50*list_display.size()+25))).clone();
+
+    //cv::imshow("image", overlay);
+    //cv::waitKey();
+    return overlay;
+
+}
+
+cv::Mat display_lap_time_ts(laps_data &laps, double start_ts){
+    //Take the given image, overlay the laps and intermediate until current index.
+    //The image is large with alpha channel.
+    cv::Mat overlay = cv::Mat::zeros(1000, 1000, CV_8UC4);
+    vector<string> list_display; //One line per lap to display
+    vector<cv::Scalar> list_color;
+    vector<double> list_lap_time;
+    bool finished_lap = false; //We only have a best lap time if we finished at least one lap
+    string unfinished = "00:00:00"; //The string for unfinished lap or intermediaire
+    string separator = "|";
+    cv::Scalar color_last(225, 150, 0, 255), color_best(118, 185, 0, 255), color_done(118, 115, 205, 255);
+    size_t lap_index = 0;
+
+    for (auto lap: laps.list_laps){
+        if (lap.list_ts[0] > start_ts) continue; // We haven't reached that lap yep
+        string current=separator;
+        lap_index++;
+        if (lap.list_ts.back() < start_ts) { // The lap is over
+            //Write the lap time
+            current += to_string(lap_index) + separator + lap.s_lap_time + separator + separator;
+            list_color.emplace_back(color_done);
+            list_lap_time.emplace_back(lap.lap_time);
+            finished_lap=true;
+        }
+        else if (lap.list_ts.front() < start_ts){ // The lap started but not over.
+            string curr_time = time_to_string(start_ts - lap.list_ts.front());
+            current += to_string(lap_index) + separator + curr_time + separator + separator;
+            list_color.emplace_back(color_last);
+            list_lap_time.emplace_back(DBL_MAX);
+        }
+        else {
+            current += to_string(lap_index) + separator + unfinished + separator + separator;
+            list_color.emplace_back(color_last);
+            list_lap_time.emplace_back(DBL_MAX);
+        }
+        //TODO once it is tested for general lap time, display the real time counter for intermediaire times.
+        for (size_t i = 1; i < lap.list_ts.size(); i++){
+            if (lap.list_ts[i] < start_ts)// We reached this intermediate.
+                current += lap.s_intermediate_time[i-1] + separator;
+            else if(lap.list_ts[i-1] < start_ts) {// We started this section, but not finished yet
+                string curr_time = time_to_string(start_ts - lap.list_ts[i-1]);                
                 current += curr_time + separator;
             }
             else

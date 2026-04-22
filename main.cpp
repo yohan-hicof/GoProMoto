@@ -11,6 +11,7 @@
 //TODO Display the speed on the bottom left using the cv::elipse.
 
 #include <iostream>
+#include <cstdio>
 #include <vector>
 #include <fstream>
 #include <chrono>
@@ -422,7 +423,8 @@ void read_write_video(){
         //cv::putText(frame, "Roll "+ to_string(lean.roll[cpt]), cv::Point(1000, 50), cv::FONT_HERSHEY_DUPLEX, 2.0, cv::Scalar(118, 185, 0, 255), 2);
 
         cv::Mat sub_frame = frame(cv::Rect(100,100,gps.blank_map.cols, gps.blank_map.rows));
-        display_position_gps(gps, data, cpt);
+        double ts = static_cast<double>(cpt)/data.framerate; 
+        display_position_gps(gps, data, ts);
         cv::addWeighted(sub_frame, 0.4, gps.position_map, 0.6, 0.0, sub_frame);
 
         cpt++;
@@ -473,7 +475,7 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
     for (auto path: paths_in)
         get_mp4_data(path.c_str(), data);
         
-    write_mp4_all_metadata("./metadata.csv", data, 500);
+    write_mp4_all_metadata(paths_in[0]+".csv", data, 500);
     //exit(0);
 
     //Extract the information of the track for the lap-time and intermediates times.
@@ -522,9 +524,11 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
             cv::cvtColor(frame, frame, cv::COLOR_BGR2BGRA);
             //Display the speed on the frame
             int start_index, end_index;
+            double curr_ts = static_cast<double>(cpt)/data.framerate - data.gps_start;
             get_list_index(data.framerate, data.gpsrate, cpt, data.gps_start, start_index, end_index);
             if (overlay_track_time) {
-                cv::Mat lap_time_overlay = display_lap_time(laps, start_index);
+                //cv::Mat lap_time_overlay = display_lap_time(laps, start_index);
+                cv::Mat lap_time_overlay = display_lap_time_ts(laps, curr_ts + data.gps_start);
                 sub_frame = frame(cv::Rect(frame.cols - lap_time_overlay.cols-50, frame.rows - lap_time_overlay.rows-50,
                                            lap_time_overlay.cols, lap_time_overlay.rows));
                 cv::addWeighted(sub_frame, 0.4, lap_time_overlay, 0.6, 0.0, sub_frame);
@@ -532,18 +536,17 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
             //Overlay the track.
             if (overlay_track) {
                 sub_frame = frame(cv::Rect(100, 100, gps.blank_map.cols, gps.blank_map.rows));
-                display_position_gps(gps, data, start_index);
-//                cerr << sub_frame.size() << "  :  " << gps.position_map.size() << endl;
-//                cerr << sub_frame.type() << "  :  " << gps.position_map.type() << endl;
-//                cerr << sub_frame.channels() << "  :  " << gps.position_map.channels() << endl;
+                //Here I have to adapt, from index, to timestamp. Also including the gps shift.
+                //For now, I just compute the second from the framerate and frame index, then give that second to the function
+                // Then update the function to look for the closest value in the data                
+                display_position_gps(gps, data, curr_ts);
                 cv::addWeighted(sub_frame, 0.4, gps.position_map, 0.6, 0.0, sub_frame);
             }
             //Overlay the speed meter
             if (overlay_speed) {
                 display_speed(speed, data.gps_speed[start_index]);
                 sub_frame = frame(cv::Rect(100, frame.rows-speed.curr_speed.rows-20,
-                                           speed.curr_speed.cols, speed.curr_speed.rows));
-                display_position_gps(gps, data, start_index);
+                                           speed.curr_speed.cols, speed.curr_speed.rows));                
                 cv::addWeighted(sub_frame, .5, speed.curr_speed, 1.0, 0.0, sub_frame);
             }
             //cv::imshow("frame", frame);
@@ -562,29 +565,8 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
     outputVideo.release();
     auto stop = high_resolution_clock::now();
     auto duration = duration_cast<seconds>(stop - start);
-    cout << "Video processing time: " << duration.count() << " seconds" << endl;
+    cout << "Video processing time: " << duration.count() << " seconds" << endl;   
 
-
-}
-
-void data_to_map_to_intermediate(){
-    //The goal of this function is to help to determine the important gps coordinate of a track using the computed map.
-    // This is for track with improper gps images on gmaps.
-
-    string video_in = "/home/yohan/Documents/gopro/done/20240715Mirecourt_2.MP4";
-    extracted_data data;
-    gps_data gps;
-    get_mp4_data(video_in.c_str(), data);
-    create_gps_object(gps, data, 1000, 1000);
-
-    //loop over indices, display the position, when clicked, next image with 100+ index.
-    for (int i = 0; i < (int)data.gps_lat.size(); i+=30){
-        display_position_gps(gps, data, i);
-        cout.precision(17);
-        cout << "Position [" << data.gps_lat[i] << "," << data.gps_long[i] << "]" << endl;
-        cv::imshow("gps position", gps.position_map);
-        cv::waitKey();
-    }
 
 }
 
@@ -638,33 +620,6 @@ void test_min_distance(){
 
 }
 
-void test_show_lap_position(){
-    //I have issue with displaying the tracks and the position on it.
-    //This function is to fix that.
-
-    auto start = high_resolution_clock::now();
-    string video_in = "/home/yohan/Documents/C++/GoProMoto/videos/GH039080.MP4";
-
-    //video_in = "./videos/20240718_anneau_1.MP4";
-    video_in = "./videos/20240716_anneau_1_2.MP4";
-
-    extracted_data data;
-    gps_data gps;
-    get_mp4_data(video_in.c_str(), data);
-    create_gps_object(gps, data, 1000, 1000);
-    int cpt = 0;
-    while(1){
-        //if (cpt%10 == 9) cout << "Frame [" << cpt+1 << "/" << data.nb_frames << "] (" << 100*(cpt+1)/data.nb_frames << "%)" << endl;
-        int start_index, end_index;
-        get_list_index(data.framerate, data.gpsrate, cpt, data.gps_start, start_index, end_index);
-
-        display_position_gps(gps, data, start_index);
-
-        cv::imshow("track map", gps.position_map);
-        cv::waitKey(10);
-        cpt++;
-    }
-}
 
 void test_write_gps_data(){
 
@@ -859,7 +814,9 @@ void parse_arguments(int argc, char* argv[]){
     concatenate_audio_streams(list_inputs, temp_audio);
     //Finally concatenante both into the output file
     concatenate_audio_video(temp_video.c_str(), temp_audio.c_str(), path_output.c_str());
-
+    //Remove the temp files
+    std::remove(temp_video.c_str());
+    std::remove(temp_audio.c_str());
 }
 
 

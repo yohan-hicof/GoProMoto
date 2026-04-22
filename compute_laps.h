@@ -20,6 +20,7 @@ struct single_lap{
     double lap_time; //In second;
     vector<double> intermediate_time;
     vector<size_t> list_index; //Only two index if no intermediate time.
+    vector<double> list_ts; //Only two index if no intermediate time. Instead of using index, use timestamp, more precise
     string s_lap_time;
     vector<string> s_intermediate_time;
 };
@@ -43,9 +44,8 @@ string time_to_string(double t);
 
 string diff_index_to_string(size_t index1, size_t index2, double hz);
 
-vector<size_t>
-find_coordinates(const extracted_data &data, double &lat, double &lon, double max_dist, size_t start_index,
-                 size_t end_index);
+vector<size_t> find_coordinates(const extracted_data &data, double &lat, double &lon, double max_dist, size_t start_index, size_t end_index);
+vector<double> find_coordinates_ts(const extracted_data &data, double &lat, double &lon, double max_dist, double start_ts, size_t end_ts);
 double haversine_meters(double lat1, double long1, double lat2, double long2);
 
 void extract_lap_info(const string filename, const extracted_data &data, laps_data &laps);
