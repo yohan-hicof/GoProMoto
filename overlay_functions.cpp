@@ -132,80 +132,7 @@ void display_position_gps(gps_data &gps, extracted_data &data, double ts) {
     cv::circle(gps.position_map, cv::Point(x, y), 2*gps.position_circle/3, cv::Scalar(255,0,0,255), -1);
 }
 
-cv::Mat display_lap_time(laps_data &laps, size_t index){
-    //Take the given image, overlay the laps and intermediate until current index.
-    //The image is large with alpha channel.
-    cv::Mat overlay = cv::Mat::zeros(1000, 1000, CV_8UC4);
-    vector<string> list_display; //One line per lap to display
-    vector<cv::Scalar> list_color;
-    vector<double> list_lap_time;
-    bool finished_lap = false; //We only have a best lap time if we finished at least one lap
-    string unfinished = "00:00:00"; //The string for unfinished lap or intermediaire
-    string separator = "|";
-    cv::Scalar color_last(225, 150, 0, 255), color_best(118, 185, 0, 255), color_done(118, 115, 205, 255);
-    size_t lap_index = 0;
-
-    for (auto lap: laps.list_laps){
-        if (lap.list_index[0] > index) continue; // We haven't reached that lap yep
-        string current=separator;
-        lap_index++;
-        if (lap.list_index.back() < index) { // The lap is over
-            //Write the lap time
-            current += to_string(lap_index) + separator + lap.s_lap_time + separator + separator;
-            list_color.emplace_back(color_done);
-            list_lap_time.emplace_back(lap.lap_time);
-            finished_lap=true;
-        }
-        else if (lap.list_index.front() < index){ // The lap started but not over.
-            string curr_time = diff_index_to_string(lap.list_index.front(), index, laps.gps_hz);
-            current += to_string(lap_index) + separator + curr_time + separator + separator;
-            list_color.emplace_back(color_last);
-            list_lap_time.emplace_back(DBL_MAX);
-        }
-        else {
-            current += to_string(lap_index) + separator + unfinished + separator + separator;
-            list_color.emplace_back(color_last);
-            list_lap_time.emplace_back(DBL_MAX);
-        }
-        //TODO once it is tested for general lap time, display the real time counter for intermediaire times.
-        for (size_t i = 1; i < lap.list_index.size(); i++){
-            if (lap.list_index[i] < index)// We reached this intermediate.
-                current += lap.s_intermediate_time[i-1] + separator;
-            else if(lap.list_index[i-1] < index) {// We started this section, but not finished yet
-                string curr_time = diff_index_to_string(lap.list_index[i-1], index, laps.gps_hz);
-                current += curr_time + separator;
-            }
-            else
-                current += unfinished + separator;
-        }
-        list_display.emplace_back(current);
-    }
-    //Find the best lap_time and update its color
-    if (finished_lap){
-        double best_time = list_lap_time[0];
-        size_t best_index = 0;
-        for (size_t i = 0; i < list_lap_time.size(); i++){
-            if (best_time > list_lap_time[i]){
-                best_time = list_lap_time[i];
-                best_index = i;
-            }
-        }
-        list_color[best_index] = color_best;
-    }
-    //Put the text onto the image.
-    for (size_t i = 0; i < list_display.size(); i++){
-        cv::putText(overlay, list_display[i], cv::Point(5, 50*i+50), cv::FONT_HERSHEY_DUPLEX, 1.5, list_color[i], 2);
-    }
-    //Crop the image to its minimal size
-    overlay = overlay(cv::Rect(cv::Point(0,0), cv::Point(overlay.cols, 50*list_display.size()+25))).clone();
-
-    //cv::imshow("image", overlay);
-    //cv::waitKey();
-    return overlay;
-
-}
-
-cv::Mat display_lap_time_ts(laps_data &laps, double start_ts){
+cv::Mat display_lap_time(laps_data &laps, double start_ts){
     //Take the given image, overlay the laps and intermediate until current index.
     //The image is large with alpha channel.
     cv::Mat overlay = cv::Mat::zeros(1000, 1000, CV_8UC4);
@@ -289,7 +216,7 @@ void crop_borders(cv::Mat &image){
                 last_x = x;
             }
         }
-            }
+    }
 
 }
 
@@ -339,6 +266,18 @@ void create_speed_meter(speed_overlay &speed, const size_t width, const size_t h
     }
 }
 
+void display_speed(speed_overlay &speed, extracted_data &data, double ts){
+    //Find the correct speed using the extracted data and the timestamp, then call the function with the speed.
+    //This is an update of the previous function that was using the imprecise index.
+    int index = 0;
+    while(data.gps_ts[index] < ts){
+        index++;
+        if (index >= data.gps_ts.size()-1) break;
+    }
+    double s = data.gps_speed[index];
+    display_speed(speed, s);
+}
+
 void display_speed(speed_overlay &speed, double v){
     //Overlay the needle on top of an existing blank speed-meter
     //Later also display the digits.
@@ -351,13 +290,15 @@ void display_speed(speed_overlay &speed, double v){
     double rad = (adjusted_v+90)*M_PI/180.0;
     p2.x = speed.radius * cos(rad) + speed.centre.x;
     p2.y = speed.radius * sin(rad) + speed.centre.y;
-    p1.x = 0.70*speed.radius * cos(rad) + speed.centre.x;
-    p1.y = 0.70*speed.radius * sin(rad) + speed.centre.y;
+    p1.x = 0.60*speed.radius * cos(rad) + speed.centre.x;
+    p1.y = 0.60*speed.radius * sin(rad) + speed.centre.y;
 
     //Add the line for the speed
-    cv::Scalar color(255,255,255,255);
-    int thickness = max(3, min(speed.curr_speed.rows, speed.curr_speed.cols)/100);
-    cv::line(speed.curr_speed, p1, p2, color, thickness);
+    cv::Scalar color(255,255,255,255), color_black(0,0,0,255);
+    int thickness_out = max(7, min(speed.curr_speed.rows, speed.curr_speed.cols)/100);
+    int thickness_in = thickness_out-4;
+    cv::line(speed.curr_speed, p1, p2, color, thickness_out);
+    cv::line(speed.curr_speed, p1, p2, color_black, thickness_in);
 
     //Create the image with the 3 digits
     cv::Mat digits;

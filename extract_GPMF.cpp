@@ -33,19 +33,21 @@ int get_mp4_data(const char* filename, extracted_data &data) {
 	GPMF_ERR ret = GPMF_OK;
     uint32_t old_nb_frames = data.nb_frames;
 
-	do{
-		ret = GetGPSMP4File(filename, data);
-	} while (ret == GPMF_OK && --fuzzloopcount > 0);
+    do{
+	ret = GetGPSMP4File(filename, data);
+    } while (ret == GPMF_OK && --fuzzloopcount > 0);
 
     correct_gps_data(data);
 
-	do{
-		ret = GetACCLMP4File(filename, data);
-	} while (ret == GPMF_OK && --fuzzloopcount > 0);
+    do{
+	ret = GetACCLMP4File(filename, data);
+    } while (ret == GPMF_OK && --fuzzloopcount > 0);
 
-	do{
-		ret = GetGYROMP4File(filename, data);
-	} while (ret == GPMF_OK && --fuzzloopcount > 0);
+    do{
+	ret = GetGYROMP4File(filename, data);
+    } while (ret == GPMF_OK && --fuzzloopcount > 0);
+
+    //average_imu_data(data, 51);
 
     //Update the number of frames in case of several videos files
     data.nb_frames += old_nb_frames;
@@ -130,7 +132,37 @@ void correct_gps_data(extracted_data &data){
 
 }
 
-void average_imu_data(extracted_data &data, int window_size=5){
+std::vector<double> gaussian_smooth(const std::vector<double>& v, int ksize) {
+    int half = ksize / 2;
+    double sigma = ksize / 3.0;  // reasonable default
+
+    // build kernel
+    std::vector<double> kernel(ksize);
+    double sum = 0.0;
+    for (int i = 0; i < ksize; ++i) {
+        int x = i - half;
+        kernel[i] = std::exp(-(x * x) / (2 * sigma * sigma));
+        sum += kernel[i];
+    }
+    for (double& w : kernel) w /= sum;
+
+    // convolve
+    std::vector<double> out(v.size());
+    for (size_t i = 0; i < v.size(); ++i) {
+        double acc = 0.0;
+        for (int j = 0; j < ksize; ++j) {
+            int idx = int(i) + j - half;
+            // clamp edges
+            if (idx < 0) idx = 0;
+            if (idx >= (int)v.size()) idx = v.size() - 1;
+            acc += v[idx] * kernel[j];
+        }
+        out[i] = acc;
+    }
+    return out;
+}
+
+void average_imu_data(extracted_data &data, int window_size){
     //Average the accl and gyro data over a window. The window should be an odd value
     //Use the following coefficient [1/k,2/k,..., 1 ,k-1/k,k-2/k,...1/k] with k = floor(window_size/2)
     
@@ -138,6 +170,20 @@ void average_imu_data(extracted_data &data, int window_size=5){
         cerr << "Error in " << __FUNCTION__ << " invalid window size" << endl;
         return;
     }
+    
+    if (data.accl_x.size() == 0 || data.gyro_x.size() == 0){
+    	cerr << "Error in " << __FUNCTION__ << " empty input vector" << endl;
+        return;
+    }
+    
+    data.accl_x = gaussian_smooth(data.accl_x, window_size);
+    data.accl_y = gaussian_smooth(data.accl_y, window_size);
+    data.accl_z = gaussian_smooth(data.accl_z, window_size);
+    data.gyro_x = gaussian_smooth(data.gyro_x, window_size);
+    data.gyro_y = gaussian_smooth(data.gyro_y, window_size);
+    data.gyro_z = gaussian_smooth(data.gyro_z, window_size);      
+    
+    return;          
     
     int half_window = window_size/2;
     vector<double> coefs(half_window,1.0);
@@ -150,12 +196,12 @@ void average_imu_data(extracted_data &data, int window_size=5){
     
     //Create copy of the vectors to smooth
     std::vector<double> accl_x=data.accl_x, accl_y=data.accl_y, accl_z=data.accl_z;
-    std::vector<double> gyro_x=data.gyro_x, gyro_y=data.gyro_y, gyro_z=data.gyro_z;
+    std::vector<double> gyro_x=data.gyro_x, gyro_y=data.gyro_y, gyro_z=data.gyro_z;   
     
     for (size_t i = half_window+1; i < accl_x.size()-half_window-1; i++){
         double ax = accl_x[i+half_window], ay = accl_y[i+half_window], az = accl_z[i+half_window];
         double gx = gyro_x[i+half_window], gy = gyro_y[i+half_window], gz = gyro_z[i+half_window];
-        for (size_t j = 0; j < half_windows; j++){
+        for (size_t j = 0; j < half_window; j++){            
             ax += (accl_x[i+half_window+j]+accl_x[i+j])*coefs[j];
             ay += (accl_y[i+half_window+j]+accl_y[i+j])*coefs[j];
             az += (accl_z[i+half_window+j]+accl_z[i+j])*coefs[j];
@@ -198,7 +244,7 @@ void write_mp4_metadata(const string filename, extracted_data &data){
 void write_mp4_all_metadata(const string filename, extracted_data &data, size_t nb_data_points){
 
     // Add all the information, not just these one.
-    if (nb_data_points == 0) nb_data_points = data.gps_lat.size();
+    if (nb_data_points <= 0) nb_data_points = data.gps_lat.size();
 
     ofstream file(filename);
 

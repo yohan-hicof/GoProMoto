@@ -442,6 +442,23 @@ void read_write_video(){
 
 }
 
+void lean_angle(extracted_data &data, double ts, double &l1, double &l2, double &l3, double &l4){
+
+    //Find the index close to ts.
+    int index = 0;
+    while (data.gps_ts[index] < ts) {
+        index++;
+        if (index >= data.gps_ts.size() -1) return;
+    }
+    double accl_x = data.accl_x[index], accl_y = data.accl_y[index], accl_z = data.accl_z[index];
+    
+    l1 = atan2(accl_z, accl_y)*180.0/M_PI;
+    l2 = atan2(accl_z, accl_x)*180.0/M_PI;
+    
+    l3 = atan2(accl_y, accl_z)*180.0/M_PI;
+    l4 = atan2(accl_x, accl_z)*180.0/M_PI;
+
+}
 
 void process_several_videos(vector<string> &paths_in, const string &path_out, bool overlay_track, string path_tracks_info) {
     //Since the gopro tends to cut the videos into smaller one, we have several input, a single output.
@@ -475,7 +492,7 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
     for (auto path: paths_in)
         get_mp4_data(path.c_str(), data);
         
-    write_mp4_all_metadata(paths_in[0]+".csv", data, 500);
+    write_mp4_all_metadata(paths_in[0]+".csv", data, 0);
     //exit(0);
 
     //Extract the information of the track for the lap-time and intermediates times.
@@ -499,6 +516,28 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
         cerr << "Could not open the output video file for write: " << path_out << endl;
         return;
     }
+    
+#if 1
+    //Testing the lean stuff
+    double minl1 = 10000, maxl1 = -10000;
+    double minl2 = 10000, maxl2 = -10000;
+    double minl3 = 10000, maxl3 = -10000;
+    double minl4 = 10000, maxl4 = -10000;
+    for (int i = 0; i < 15000; i++){//One 4gb video should be 17k frames
+        double curr_ts = static_cast<double>(i)/data.framerate;
+        double l1, l2,l3, l4;
+        lean_angle(data, curr_ts, l1, l2, l3, l4);    
+        minl1 = min(minl1, l1); maxl1 = max(maxl1, l1);
+        minl2 = min(minl2, l2); maxl2 = max(maxl2, l2);
+        minl3 = min(minl3, l3); maxl3 = max(maxl3, l3);
+        minl4 = min(minl4, l4); maxl4 = max(maxl4, l4);
+    }
+    cerr << "L1: [" << minl1 << "," << maxl1 << "]" << endl;
+    cerr << "L2: [" << minl2 << "," << maxl2 << "]" << endl;
+    cerr << "L3: [" << minl3 << "," << maxl3 << "]" << endl;
+    cerr << "L4: [" << minl4 << "," << maxl4 << "]" << endl;   
+    
+#endif
 
     for (auto path: paths_in){
         cap.open(path);
@@ -523,12 +562,9 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
             //Convert to rgba
             cv::cvtColor(frame, frame, cv::COLOR_BGR2BGRA);
             //Display the speed on the frame
-            int start_index, end_index;
-            double curr_ts = static_cast<double>(cpt)/data.framerate - data.gps_start;
-            get_list_index(data.framerate, data.gpsrate, cpt, data.gps_start, start_index, end_index);
+            double curr_ts = static_cast<double>(cpt)/data.framerate;
             if (overlay_track_time) {
-                //cv::Mat lap_time_overlay = display_lap_time(laps, start_index);
-                cv::Mat lap_time_overlay = display_lap_time_ts(laps, curr_ts + data.gps_start);
+                cv::Mat lap_time_overlay = display_lap_time(laps, curr_ts);
                 sub_frame = frame(cv::Rect(frame.cols - lap_time_overlay.cols-50, frame.rows - lap_time_overlay.rows-50,
                                            lap_time_overlay.cols, lap_time_overlay.rows));
                 cv::addWeighted(sub_frame, 0.4, lap_time_overlay, 0.6, 0.0, sub_frame);
@@ -544,14 +580,21 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
             }
             //Overlay the speed meter
             if (overlay_speed) {
-                display_speed(speed, data.gps_speed[start_index]);
+                display_speed(speed, data, curr_ts);
                 sub_frame = frame(cv::Rect(100, frame.rows-speed.curr_speed.rows-20,
                                            speed.curr_speed.cols, speed.curr_speed.rows));                
                 cv::addWeighted(sub_frame, .5, speed.curr_speed, 1.0, 0.0, sub_frame);
             }
-            //cv::imshow("frame", frame);
-            //cv::waitKey();
-
+            
+            if (false){
+                ///Testing, try to add to the frame, the current lean angle
+                double l1, l2,l3, l4;
+                lean_angle(data, curr_ts, l1, l2, l3, l4);
+                string lean_text = "L1: " + to_string(static_cast<int>(l1)) + ", L2: " + to_string(static_cast<int>(l2));
+                lean_text += "L3: " + to_string(static_cast<int>(l3)) + ", L4: " + to_string(static_cast<int>(l4));
+                cv::putText(frame, lean_text, cv::Point(1500, 250), cv::FONT_HERSHEY_DUPLEX, 1.5, cv::Scalar(255,255,0), 4);
+                cv::putText(frame, lean_text, cv::Point(1500, 250), cv::FONT_HERSHEY_DUPLEX, 1.5, cv::Scalar(0,0,0), 2);            
+            }
             cpt++;
             //Back to the rgb space
             cv::cvtColor(frame, frame, cv::COLOR_BGRA2BGR);
