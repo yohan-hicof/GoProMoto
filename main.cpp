@@ -350,97 +350,6 @@ double get_mean_value(const extracted_data &data, const string &type, const int 
     return mean_val;
 }
 
-void read_write_video(){
-
-    auto start = high_resolution_clock::now();
-    string video_in = "/home/yohan/Documents/C++/GoProMoto/videos/GH039080.MP4";
-    //string video_in = "/home/yohan/Documents/C++/GoProMoto/videos/hero7.MP4";
-    string video_out = "/home/yohan/Documents/C++/GoProMoto/videos/GH039080_out.MP4";
-
-    //video_in = "/home/yohan/Documents/gopro/merged/20240718_anneau_1.MP4";
-    //video_out = "/home/yohan/Documents/gopro/merged/20240718_anneau_1_mod.MP4";
-
-    video_in = "./videos/20240716_anneau_1_2.MP4";
-    video_out = "./videos/20240716_anneau_1_2_mod.MP4";
-
-    VideoCapture cap(video_in);
-
-    if(!cap.isOpened()){
-        cout << "Error opening video stream or file" << endl;
-        return;
-    }
-    cout << "Video is opened" << endl;
-
-    int cpt = 0;
-    int frame_width = static_cast<int>(cap.get(CAP_PROP_FRAME_WIDTH));
-    int frame_height = static_cast<int>(cap.get(CAP_PROP_FRAME_HEIGHT));
-
-    extracted_data data;
-    gps_data gps;
-    get_mp4_data(video_in.c_str(), data);
-    create_gps_object(gps, data, frame_width/3, frame_height/3);
-    convert_ms2kmh(data);
-
-    lean_data lean;
-    compute_pitch_roll(data, lean);
-
-    cerr << "gyro unit: " << data.gyro_x_unit << endl;
-    //return;
-
-    if (data.nb_frames < 1) {
-        cerr << "No data extracted from the frames" << endl;
-        return;
-    }
-    cerr << "Number of frames: " << data.nb_frames << endl;
-
-    int ex = static_cast<int>(cap.get(CAP_PROP_FOURCC));
-    char EXT[] = {(char)(ex & 0XFF) , (char)((ex & 0XFF00) >> 8),(char)((ex & 0XFF0000) >> 16),(char)((ex & 0XFF000000) >> 24), 0};
-    Size S = Size((int) cap.get(CAP_PROP_FRAME_WIDTH), (int) cap.get(CAP_PROP_FRAME_HEIGHT));
-
-    VideoWriter outputVideo;  // Open the output
-    outputVideo.open(video_out, ex, cap.get(CAP_PROP_FPS), S, true);
-
-    if (!outputVideo.isOpened()) {
-        cerr << "Could not open the output video file for write\n";
-        return;
-    }
-
-    while(1){
-        Mat frame;
-        cap >> frame;
-        if (frame.empty())
-            break;
-        //Convert to rgba
-        cv::cvtColor(frame, frame, cv::COLOR_BGR2BGRA);
-        //Display the speed on the frame
-        int start_index, end_index;
-
-        get_list_index(data.framerate, data.gpsrate, cpt, data.gps_start, start_index, end_index);
-        double speed = get_mean_value(data, "gps_speed", start_index, end_index);
-        cerr << "Computed speed at frame " << cpt << ": " << speed << " Start index:" << start_index << ", end: " << end_index << endl;
-        cv::putText(frame, to_string(speed)+"Km/h", cv::Point(50, 50), cv::FONT_HERSHEY_DUPLEX, 2.0, cv::Scalar(118, 185, 0, 255), 2);
-        //cv::putText(frame, "Pitch "+ to_string(lean.pitch[cpt]), cv::Point(500, 50), cv::FONT_HERSHEY_DUPLEX, 2.0, cv::Scalar(118, 185, 0, 255), 2);
-        //cv::putText(frame, "Roll "+ to_string(lean.roll[cpt]), cv::Point(1000, 50), cv::FONT_HERSHEY_DUPLEX, 2.0, cv::Scalar(118, 185, 0, 255), 2);
-
-        cv::Mat sub_frame = frame(cv::Rect(100,100,gps.blank_map.cols, gps.blank_map.rows));
-        double ts = static_cast<double>(cpt)/data.framerate; 
-        display_position_gps(gps, data, ts);
-        cv::addWeighted(sub_frame, 0.4, gps.position_map, 0.6, 0.0, sub_frame);
-
-        cpt++;
-        //Back to the rgb space
-        cv::cvtColor(frame, frame, cv::COLOR_BGRA2BGR);
-        outputVideo << frame;
-        if (cpt > 1000) break;
-    }
-    //Close the writer.
-    outputVideo.release();
-
-    auto stop = high_resolution_clock::now();
-    auto duration = duration_cast<milliseconds>(stop - start);
-    cout << "Video processing time: " << duration.count() << endl;
-
-}
 
 void lean_angle(extracted_data &data, double ts, double &l1, double &l2, double &l3, double &l4){
 
@@ -460,15 +369,21 @@ void lean_angle(extracted_data &data, double ts, double &l1, double &l2, double 
 
 }
 
-void process_several_videos(vector<string> &paths_in, const string &path_out, bool overlay_track, string path_tracks_info) {
+
+int process_several_videos(vector<string> &paths_in, const string &path_out, bool overlay_track, string path_tracks_info, 
+                           bool auto_crop, double &crop_start_ts, double &crop_end_ts, double crop_shift_ts) {
     //Since the gopro tends to cut the videos into smaller one, we have several input, a single output.
     //We assume that they are given in the proper order and that they have the same frame information.
+
+    ///TODO finish the audio auto cut (mostly the end)
+    ///TODO Replace the call of this function by a struct with all the data.
+    ///TODO add other struct into the main struct (speed overlay, gps_data...)
 
     auto start = high_resolution_clock::now();
     VideoCapture cap(paths_in[0]);
     if (!cap.isOpened()) {
         cout << "Error opening video stream or file: " << paths_in[0] << endl;
-        return;
+        return -1;
     }
     cout << "Video " << paths_in[0] << " is opened" << endl;
 
@@ -476,11 +391,15 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
     int frame_width = static_cast<int>(cap.get(CAP_PROP_FRAME_WIDTH));
     int frame_height = static_cast<int>(cap.get(CAP_PROP_FRAME_HEIGHT));
     int ex = static_cast<int>(cap.get(CAP_PROP_FOURCC));
-    double fps = cap.get(CAP_PROP_FPS);
+    double fps = cap.get(CAP_PROP_FPS);    
     bool overlay_track_time = path_tracks_info.empty() ? false : true;
     bool overlay_speed = true; //Todo Add an option to add or not the speed
     //Close the video in, we now know the frame size for the output.
     cap.release();
+
+    //Used if we want to auto crop around the computed laps
+    crop_start_ts = 0;
+    crop_end_ts = DBL_MAX;    
 
     speed_overlay speed;
     create_speed_meter(speed, frame_height/4, frame_height/4);
@@ -491,21 +410,28 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
     //Extract the data from the videos
     for (auto path: paths_in)
         get_mp4_data(path.c_str(), data);
-        
-    write_mp4_all_metadata(paths_in[0]+".csv", data, 0);
+  
+    //write_mp4_all_metadata(paths_in[0]+".csv", data, 0);
     //exit(0);
 
     //Extract the information of the track for the lap-time and intermediates times.
-    if (overlay_track_time) {
+    if (overlay_track_time) {        
         extract_lap_info(path_tracks_info, data, laps);
-        gps.track_name = laps.track_name;
+        gps.track_name = laps.track_name;        
+        // If we want to auto crop, we need to find when to start and to end.
+        if (auto_crop && !laps.list_laps.empty()){
+            crop_start_ts = max(0.0, laps.list_laps[0].list_ts[0]-crop_shift_ts);            
+            crop_end_ts = laps.list_laps.back().list_ts.back() + crop_shift_ts;
+            cerr << "Auto cropping from : " << crop_start_ts << " to " << crop_end_ts << endl;
+        }
     }
 
     //Create the object with the track overlay
-    if (!create_gps_object(gps, data, frame_width/3, frame_height/3)){
+    if (!create_gps_object(gps, data, laps, frame_width/3, frame_height/3)){
         overlay_track = false;
         overlay_speed = false;
     }
+
     convert_ms2kmh(data);
 
     //Open the output video
@@ -514,41 +440,18 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
 
     if (!outputVideo.isOpened()) {
         cerr << "Could not open the output video file for write: " << path_out << endl;
-        return;
+        return -1;
     }
     
-#if 1
-    //Testing the lean stuff
-    double minl1 = 10000, maxl1 = -10000;
-    double minl2 = 10000, maxl2 = -10000;
-    double minl3 = 10000, maxl3 = -10000;
-    double minl4 = 10000, maxl4 = -10000;
-    for (int i = 0; i < 15000; i++){//One 4gb video should be 17k frames
-        double curr_ts = static_cast<double>(i)/data.framerate;
-        double l1, l2,l3, l4;
-        lean_angle(data, curr_ts, l1, l2, l3, l4);    
-        minl1 = min(minl1, l1); maxl1 = max(maxl1, l1);
-        minl2 = min(minl2, l2); maxl2 = max(maxl2, l2);
-        minl3 = min(minl3, l3); maxl3 = max(maxl3, l3);
-        minl4 = min(minl4, l4); maxl4 = max(maxl4, l4);
-    }
-    cerr << "L1: [" << minl1 << "," << maxl1 << "]" << endl;
-    cerr << "L2: [" << minl2 << "," << maxl2 << "]" << endl;
-    cerr << "L3: [" << minl3 << "," << maxl3 << "]" << endl;
-    cerr << "L4: [" << minl4 << "," << maxl4 << "]" << endl;   
-    
-#endif
-
     for (auto path: paths_in){
         cap.open(path);
         if(!cap.isOpened()){
             cout << "Error opening video stream or file: " << path << endl;
-            return;
+            return -1;
         }
         cout << "Video " << path << " is opened" << endl;
 
-        while(1){
-            //if (cpt%200 == 199) cout << "Frame [" << cpt+1 << "/" << data.nb_frames << "] (" << 100*(cpt+1)/data.nb_frames << "%)" << endl;
+        while(1){            
             if (cpt%200 == 199) {
                 auto inter = high_resolution_clock::now();
                 auto dur = duration_cast<milliseconds>(inter - start);
@@ -562,7 +465,14 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
             //Convert to rgba
             cv::cvtColor(frame, frame, cv::COLOR_BGR2BGRA);
             //Display the speed on the frame
-            double curr_ts = static_cast<double>(cpt)/data.framerate;
+            double curr_ts = static_cast<double>(cpt++)/data.framerate;
+            //If we have auto crop, check if we are before the first lap, or after the last lap
+            if (auto_crop && !laps.list_laps.empty()){
+                if (curr_ts < crop_start_ts || curr_ts > crop_end_ts)
+                    continue;                
+            }
+                
+
             if (overlay_track_time) {
                 cv::Mat lap_time_overlay = display_lap_time(laps, curr_ts);
                 sub_frame = frame(cv::Rect(frame.cols - lap_time_overlay.cols-50, frame.rows - lap_time_overlay.rows-50,
@@ -576,7 +486,16 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
                 //For now, I just compute the second from the framerate and frame index, then give that second to the function
                 // Then update the function to look for the closest value in the data                
                 display_position_gps(gps, data, curr_ts);
-                cv::addWeighted(sub_frame, 0.4, gps.position_map, 0.6, 0.0, sub_frame);
+                //cv::addWeighted(sub_frame, 0.4, gps.position_map, 0.6, 0.0, sub_frame);
+                //cv::addWeighted(sub_frame, 1.0, gps.position_map, 1.0, 0.0, sub_frame);
+                //cv::bitwise_or(sub_frame, gps.position_map, sub_frame);
+
+                //Try to overlay the track properly
+                std::vector<cv::Mat> channels;
+                cv::split(gps.position_map, channels);
+                const cv::Mat& mask = channels[3]; // 0 = transparent, 255 = opaque
+                // Copy only the pixels where alpha != 0; the rest of the background is untouched
+                gps.position_map.copyTo(sub_frame, mask);                
             }
             //Overlay the speed meter
             if (overlay_speed) {
@@ -594,12 +513,10 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
                 lean_text += "L3: " + to_string(static_cast<int>(l3)) + ", L4: " + to_string(static_cast<int>(l4));
                 cv::putText(frame, lean_text, cv::Point(1500, 250), cv::FONT_HERSHEY_DUPLEX, 1.5, cv::Scalar(255,255,0), 4);
                 cv::putText(frame, lean_text, cv::Point(1500, 250), cv::FONT_HERSHEY_DUPLEX, 1.5, cv::Scalar(0,0,0), 2);            
-            }
-            cpt++;
+            }            
             //Back to the rgb space
             cv::cvtColor(frame, frame, cv::COLOR_BGRA2BGR);
-            outputVideo << frame;
-            //if (cpt > 8000) break;
+            outputVideo << frame;            
         }
         cout << "Releasing the capture" << endl;
         cap.release();
@@ -609,110 +526,11 @@ void process_several_videos(vector<string> &paths_in, const string &path_out, bo
     auto stop = high_resolution_clock::now();
     auto duration = duration_cast<seconds>(stop - start);
     cout << "Video processing time: " << duration.count() << " seconds" << endl;   
-
-
-}
-
-void test_compute_lap(){
-
-    string video_in = "./videos/20240718_anneau_1.MP4";
-    string video_in2 = "./videos/20240718_anneau_1_2.MP4";
-    extracted_data data;
-    gps_data gps;
-    laps_data laps;
-    get_mp4_data(video_in.c_str(), data);
-    get_mp4_data(video_in2.c_str(), data);
-
-    double start_lat = 47.95120010954625;
-    double start_long = 7.416307636077316;
-
-    extract_lap_info("./tracks/tracks.csv", data, laps);
-    vector<size_t> lap_indexes = find_coordinates(data, start_lat, start_long, 10, 0, 0);
-
-    for (auto i: lap_indexes){
-        //cout << "Lap start: " << i << endl;
-    }
-    display_lap_time(laps, 3000);
-    display_lap_time(laps, 5000);
-    display_lap_time(laps, 7000);
-    display_lap_time(laps, 9000);
-    display_lap_time(laps, 10000);
-    display_lap_time(laps, 12000);
-}
-
-void test_min_distance(){
-    double lat, lon, min_dist = DBL_MAX;
-    //lat = 48.32175; lon = 6.081345;
-    //lat = 48.321204; lon = 6.0840587;
-    lat = 48.320570; lon = 6.0825542;
-
-    string path_video = "/home/yohan/Documents/gopro/done/20240715Mirecourt_2.MP4";
-
-    extracted_data data;
-    gps_data gps;
-    laps_data laps;
-    get_mp4_data(path_video.c_str(), data);
-
-    for (size_t i = 0; i < data.gps_lat.size(); i++){
-        double dist = haversine_meters(lat, lon, data.gps_lat[i], data.gps_long[i]);
-        if (min_dist > dist) min_dist = dist;
-    }
-
-    cout << "Minimum distance: " << min_dist << "m" << endl;
-
+    return 0;
 
 }
 
 
-void test_write_gps_data(){
-
-    // /home/yohan/Documents/gopro/GH019947.MP4
-    // /home/yohan/Documents/gopro/GH029947.MP4
-    string video_1 = "/home/yohan/Documents/gopro/GH019947.MP4";
-    string video_2 = "/home/yohan/Documents/gopro/GH029947.MP4";
-
-    extracted_data data;
-    gps_data gps;
-    gps.track_name = "Mirecourt";
-    get_mp4_data(video_1.c_str(), data);
-    get_mp4_data(video_2.c_str(), data);
-    //Test, to correct the GPS data inconsistency. It seems that sometime the data jump around.
-
-    create_gps_object(gps, data, 1000, 1000);
-    write_mp4_metadata("./output/metadata_test.txt", data);
-
-    cout << "Lat: [" << gps.min_lat << "," << gps.max_lat << "]\n";
-    cout << "Long: [" << gps.min_long << "," << gps.max_long << "]\n";
-
-    cout << "distance: " << haversine_meters(gps.min_lat, gps.min_long, gps.max_lat, gps.max_long) << endl;
-
-    cv::imshow("Track", gps.blank_map);
-    cv::waitKey();
-
-}
-
-void display_speed(){
-
-    speed_overlay speed;
-    create_speed_meter(speed, 500, 500);
-    //display_speed(speed, static_cast<double> (i));
-
-    cv::imshow("image", speed.blank_speed);
-    cv::waitKey();
-
-    //cv::ellipse(speed.blank_speed,speed.centre, cv::Size(speed.radius,speed.thickness), 0, 135, 225, mid, speed.thickness);
-    for (size_t i = 0; i < 360; i+=20){
-        size_t s = (i+270)%360;
-        //speed.curr_speed = speed.blank_speed.clone();
-        //cv::ellipse(speed.curr_speed,speed.centre, cv::Size(speed.radius,speed.thickness), s, 135, 225, cv::Scalar(0,225,125,255), speed.thickness);
-        display_speed(speed, static_cast<double> (i));
-        cerr << "Speed: " << i << endl;
-        cv::imshow("image", speed.curr_speed);
-        cv::waitKey();
-
-    }
-
-}
 
 void test(){
 
@@ -739,15 +557,12 @@ void test(){
     //test_compute_lap();
     //test_show_lap_position();
     //test_min_distance();
-    //process_video(path_in, path_out, true, path_tracks);
-    //process_several_videos(list_path_in, path_out, true, path_tracks);
 
     //concatenate_audio_streams(list_path_in, path_out_audio);
     //concatenate_audio_video(path_out.c_str(), path_out_audio.c_str(), path_merged.c_str());
     //concatenate_audio_streams(list_path_in[0].c_str(), list_path_in[1].c_str(), path_out_audio.c_str());
     //data_to_map_to_intermediate();
-    //test_write_gps_data();
-    display_speed();
+    //test_write_gps_data();    
 
 }
 
@@ -813,7 +628,7 @@ void parse_arguments(int argc, char* argv[]){
     vector<string> arg, list_inputs;
     string path_output, path_tracks;
     string temp_video = "./temp_video.MP4", temp_audio = "./temp_audio.aac";
-    bool overlay_track=true;
+    bool overlay_track=true, auto_crop=false;
     for (int i = 1; i < argc; i++){
         arg.emplace_back(argv[i]);
     }
@@ -828,7 +643,8 @@ void parse_arguments(int argc, char* argv[]){
         if (arg[i] == "-t" && i < arg.size()-1){
             path_tracks = arg[i+1];
         }
-        if (arg[i] == "-no_overlay") overlay_track=false;
+        if (arg[i] == "-no_overlay") overlay_track = false;
+        if (arg[i] == "-auto_crop" || arg[i] == "-ac") auto_crop = true;  // Take five seconds before the first lap, and 5 seconds after the last
     }
 
     if(list_inputs.empty()){
@@ -852,14 +668,18 @@ void parse_arguments(int argc, char* argv[]){
         cout << "\t" << input << "\n";
     cout << "Output: " << path_output << endl;
     //First create the overlay of the video in a temp file
-    process_several_videos(list_inputs, temp_video, overlay_track, path_tracks);
-    //Second extract the audio from the input videos.
-    concatenate_audio_streams(list_inputs, temp_audio);
-    //Finally concatenante both into the output file
-    concatenate_audio_video(temp_video.c_str(), temp_audio.c_str(), path_output.c_str());
-    //Remove the temp files
-    std::remove(temp_video.c_str());
-    std::remove(temp_audio.c_str());
+    double crop_start_ts, crop_end_ts, crop_shift_ts = 5.0;
+
+    int success = process_several_videos(list_inputs, temp_video, overlay_track, path_tracks, auto_crop, crop_start_ts, crop_end_ts, crop_shift_ts);
+    if (success >= 0){
+        //Second extract the audio from the input videos.
+        if (concatenate_audio_streams(list_inputs, temp_audio, crop_start_ts, crop_end_ts) == 0)
+            //Finally concatenante both into the output file
+            concatenate_audio_video(temp_video.c_str(), temp_audio.c_str(), path_output.c_str());
+        //Remove the temp files
+        std::remove(temp_video.c_str());
+        std::remove(temp_audio.c_str());
+    }
 }
 
 

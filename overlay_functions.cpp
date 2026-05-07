@@ -5,7 +5,29 @@
 #include "overlay_functions.h"
 
 
-bool create_gps_object(gps_data &gps, extracted_data &data, int nb_cols, int nb_rows) {
+cv::Mat create_lap_name(string &name){
+    //Put the name of the lap on a blank image, then crop around the name and return the image.
+    int width = 500, height = 200;
+    cv::Mat lap_name = cv::Mat::zeros(cv::Size(width, height), CV_8UC4);    
+    cv::putText(lap_name, name, cv::Point(10, 50), cv::FONT_HERSHEY_DUPLEX, 1.5, cv::Scalar(255,255,255,125), 2);
+    
+    //Crop the border and return the resulting image
+    int min_x = width, max_x = 0, min_y = height, max_y = 0;
+    for (int y = 0; y < height; y++){
+        for (int x = 0; x < width; x++){
+            cv::Vec4b pix = lap_name.at<cv::Vec4b>(y,x);
+            if (pix[0] != 0 || pix[1] != 0 || pix[2] != 0){
+                min_x = min(x, min_x); min_y = min(y, min_y);
+                max_x = max(x, max_x); max_y = max(y, max_y);
+            }
+        }        
+    }
+    //cerr << "lap area: " << min_x << ", " << max_x << " | " << min_y << ", " << max_y << endl;
+    lap_name = lap_name(cv::Rect(cv::Point(min_x, min_y), cv::Point(max_x,max_y))).clone();
+    return lap_name;    
+}
+
+bool create_gps_object(gps_data &gps, extracted_data &data, laps_data &ld, int nb_cols, int nb_rows) {
     //Take the data from the video, check all the gps points, draw a map that contain all these points.
     //It should be a rgba image with white pixel where we have gps.
     //We have to define the orientation (depending on lat/long variation and image size)
@@ -87,21 +109,63 @@ bool create_gps_object(gps_data &gps, extracted_data &data, int nb_cols, int nb_
                        gps.x_shift,cv::BORDER_CONSTANT, cv::Scalar(0,0,0,0));
 
     if (!gps.track_name.empty()){//Add some space at the bottom and write the name of the track
-        cv::copyMakeBorder(gps.blank_map,gps.blank_map,0,gps.y_shift,0,
-                           0,cv::BORDER_CONSTANT, cv::Scalar(0,0,0,0));
-        cv::putText(gps.blank_map, gps.track_name, cv::Point(gps.blank_map.cols/2.5, gps.blank_map.rows-8), cv::FONT_HERSHEY_DUPLEX, 1.5, cv::Scalar(255,255,255,255), 2);
+        //cv::copyMakeBorder(gps.blank_map,gps.blank_map,0,gps.y_shift,0,
+        //                   0,cv::BORDER_CONSTANT, cv::Scalar(0,0,0,0));
+        //cv::putText(gps.blank_map, gps.track_name, cv::Point(gps.blank_map.cols/5, gps.blank_map.rows-8), cv::FONT_HERSHEY_DUPLEX, 1.5, cv::Scalar(255,255,255,125), 2);
+        ///TODO, replace this put text by the function creating the minimal image size with the name
+        cv::Mat lap_name = create_lap_name(gps.track_name);
+        //cerr << "Lap name image size: " << lap_name.size() << endl;
+        //cerr << "Gps blank image size before: " << gps.blank_map.size() << endl;
+        //cv::imwrite("./lap.jpg", lap_name);
+        //Add the border to the image below.
+        cv::copyMakeBorder(gps.blank_map,gps.blank_map,0,lap_name.rows+3,0, 0,cv::BORDER_CONSTANT, cv::Scalar(0,0,0,0));        
+        cv::Point tl((gps.blank_map.cols-lap_name.cols)/2, gps.blank_map.rows-lap_name.rows-3);
+        lap_name.copyTo(gps.blank_map(cv::Rect(tl, lap_name.size())));
+        //cerr << "Gps blank image size after: " << gps.blank_map.size() << endl;
+        //cerr << "TL point: " << tl << endl;
+        
     }
     cv::Point shift(gps.y_shift, gps.y_shift);
 
-    for (auto pt: gps.list_points){
-        //pt.y = gps.blank_map.rows - pt.y;
-        cv::circle(gps.blank_map, pt+shift, gps.road_circle, cv::Scalar(255,255,255,255),-1);
+    //First a black circle, then we overlay with a smaller white one to test.
+    //Orange (0,120,225,255) looked nice
+    for (auto pt: gps.list_points)        
+        cv::circle(gps.blank_map, pt+shift, gps.road_circle, cv::Scalar(0,0,0,255),-1);
+    
+    for (auto pt: gps.list_points)        
+        cv::circle(gps.blank_map, pt+shift, gps.road_circle-2, cv::Scalar(255,255,255,255),-1);
+    
+    //If we have start line and intermediate, put them on the map
+    if (ld.finish_lat > -1000 && ld.finish_long > -1000){
+        cv::Point pt;
+        if (gps.rotate_image) {
+            pt.y = static_cast<int>((ld.finish_long-gps.min_long)/gps.scaling);
+            pt.x = static_cast<int>((ld.finish_lat-gps.min_lat)/gps.scaling);
+        }
+        else {
+            pt.y = static_cast<int>((ld.finish_lat-gps.min_lat)/gps.scaling);
+            pt.x = static_cast<int>((ld.finish_long-gps.min_long)/gps.scaling);
+        }
+        cv::circle(gps.blank_map, pt+shift, gps.road_circle+1, cv::Scalar(0,0,255,255),-1);    
+    }
+    //Now the intermediate
+    for (size_t i = 0; i < ld.intermediate_lat.size(); i++){
+        cv::Point pt;
+        if (gps.rotate_image) {
+            pt.y = static_cast<int>((ld.intermediate_long[i]-gps.min_long)/gps.scaling);
+            pt.x = static_cast<int>((ld.intermediate_lat[i]-gps.min_lat)/gps.scaling);
+        }
+        else {
+            pt.y = static_cast<int>((ld.intermediate_lat[i]-gps.min_lat)/gps.scaling);
+            pt.x = static_cast<int>((ld.intermediate_long[i]-gps.min_long)/gps.scaling);
+        }
+        cv::circle(gps.blank_map, pt+shift, gps.road_circle+1, cv::Scalar(0,255,0,255),-1);     
     }
 
     if (gps.rotate_image)
         cv::rotate(gps.blank_map, gps.blank_map, cv::ROTATE_90_COUNTERCLOCKWISE);
 
-    //cv::imwrite("./images/maps.png", gps.blank_map);
+    cv::imwrite("./maps.jpg", gps.blank_map);
     return true;
 }
 
@@ -247,10 +311,21 @@ void create_speed_meter(speed_overlay &speed, const size_t width, const size_t h
     //Transform the black into transparent
     cv::Mat mask;
     inRange(speed.blank_speed, cv::Scalar(0, 0, 0, 0), cv::Scalar(10, 10, 10, 255), mask);
-    speed.blank_speed.setTo(cv::Scalar(0, 0, 0, 0), mask);
+    speed.blank_speed.setTo(cv::Scalar(0, 0, 0, 0), mask);   
 
     //Crop the useless borders
-
+    int min_x = width, max_x = 0, min_y = height, max_y = 0;
+    for (int y = 0; y < height; y++){
+        for (int x = 0; x < width; x++){
+            cv::Vec4b pix = speed.blank_speed.at<cv::Vec4b>(y,x);
+            if (pix[0] != 0 || pix[1] != 0 || pix[2] != 0){
+                min_x = min(x, min_x); min_y = min(y, min_y);
+                max_x = max(x, max_x); max_y = max(y, max_y);
+            }
+        }        
+    }
+    speed.blank_speed = speed.blank_speed(cv::Rect(cv::Point(min_x, min_y), cv::Point(max_x,max_y))).clone();
+    
 
     //Create the digits images
     cv::Mat blank_digit = get_digit_image_from_h();
@@ -287,7 +362,9 @@ void display_speed(speed_overlay &speed, double v){
     //Adjust V between 60-300
     double adjusted_v = max(min(300.0,v), 60.0);
     cv::Point2f p1, p2;
-    double rad = (adjusted_v+90)*M_PI/180.0;
+    ///TODO, I have to adjust this angle so that the needle is correct when < 60km/h
+    //double rad = (adjusted_v+90)*M_PI/180.0;
+    double rad = (adjusted_v+100)*M_PI/180.0;
     p2.x = speed.radius * cos(rad) + speed.centre.x;
     p2.y = speed.radius * sin(rad) + speed.centre.y;
     p1.x = 0.60*speed.radius * cos(rad) + speed.centre.x;
@@ -311,7 +388,7 @@ void display_speed(speed_overlay &speed, double v){
     cv::hconcat(speed.list_digits[_000], speed.list_digits[_00], digits);
     cv::hconcat(digits, speed.list_digits[_0], digits);
     //Overlay the speed on top of the speedmeter
-    cv::Point tl((speed.curr_speed.cols-digits.cols)/2, 0.6*speed.curr_speed.rows- digits.rows);
+    cv::Point tl((speed.curr_speed.cols-digits.cols)/2, 0.72*speed.curr_speed.rows- digits.rows);
     digits.copyTo(speed.curr_speed(cv::Rect(tl, digits.size())));
 }
 

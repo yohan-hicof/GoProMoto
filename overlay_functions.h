@@ -34,6 +34,7 @@ struct speed_overlay{
 
 };
 
+
 void create_speed_meter(speed_overlay &speed, const size_t width, const size_t height);
 void display_speed(speed_overlay &speed, extracted_data &data, double ts);
 void display_speed(speed_overlay &speed, double v);
@@ -42,7 +43,9 @@ cv::Mat get_digit_image_from_h();
 void fill_digit(cv::Mat &to_fill, int digit, cv::Scalar color = cv::Scalar(23,201,232));
 
 void display_position_gps(gps_data &gps, extracted_data &data, double ts);
-bool create_gps_object(gps_data &gps, extracted_data &data, int nb_cols, int nb_rows);
+
+cv::Mat create_lap_name(string &name);
+bool create_gps_object(gps_data &gps, extracted_data &data, laps_data &ld, int nb_cols, int nb_rows);
 
 cv::Mat display_lap_time(laps_data &laps, double start_ts);
 

@@ -37,7 +37,9 @@ int get_mp4_data(const char* filename, extracted_data &data) {
 	ret = GetGPSMP4File(filename, data);
     } while (ret == GPMF_OK && --fuzzloopcount > 0);
 
+    //Correct the first data points (no gps yet). Then check for the consistency
     correct_gps_data(data);
+    check_gps_data(data);
 
     do{
 	ret = GetACCLMP4File(filename, data);
@@ -130,6 +132,25 @@ void correct_gps_data(extracted_data &data){
         }
     }
 
+}
+
+bool check_gps_data(extracted_data &data){
+    //The idea is to check if consecutive points in the gps data are close. i.e. if d(pt[i],pt[i+1]) < epsilon
+    //With epsilon a small distance like 10 meters.
+    //Assuming 8 points per second for the gps, max speed 300km/h -> 83m/s -> 10.4m/point
+    
+    double epsilon = 25;
+    int nb_jumps = 0;
+    
+    for (size_t i = 1; i < data.gps_lat.size(); i++){
+        double distance = haversine_meters(data.gps_lat[i], data.gps_long[i], data.gps_lat[i-1], data.gps_long[i-1]);
+        if (distance > epsilon) nb_jumps++;    
+    }
+    if (nb_jumps != 0){
+        cerr << "Error in GPS data, we have " << nb_jumps << " jumps in the data" << endl;
+        return false;
+    }
+    return true;
 }
 
 std::vector<double> gaussian_smooth(const std::vector<double>& v, int ksize) {
@@ -269,8 +290,8 @@ void write_mp4_all_metadata(const string filename, extracted_data &data, size_t 
     //Now the data themselves
     file << "GPS lat, long, alt, speed, speed2, GPS ts, accl_x, accl_y, accl_z, gyro_x, gyro_y, gyro_z" << "\n";
     for (size_t i = 0; i < nb_data_points; i++){
-        file << data.gps_lat[i] <<","<< data.gps_long[i] <<","<< data.gps_alt[i] <<",";
-        file << data.gps_speed[i] <<","<< data.gps_speed2[i] << "," << data.gps_ts[i];
+        file << std::setprecision(6) << data.gps_lat[i] << "," <<  std::setprecision(6) << data.gps_long[i] <<","<<  std::setprecision(6) << data.gps_alt[i] <<",";
+        file << data.gps_speed[i] <<","<< data.gps_speed2[i] << ","  << std::setprecision(6) << data.gps_ts[i];
         file << "," << data.accl_x[i] << "," << data.accl_y[i] << "," << data.accl_z[i];
         file << "," << data.gyro_x[i] << "," << data.gyro_y[i] << "," << data.gyro_z[i] <<"\n";
     }
@@ -779,4 +800,235 @@ GPMF_ERR GetGYROMP4File(const char* filename, extracted_data &data){
 	}
 
 	return ret;
+}
+
+
+//---------------------CLAUDE, fix gps jump------------------------//
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  GPS Track Cleaner
+//
+//  Problem: GoPro (and many other action-cam GPS receivers) occasionally emit
+//  samples that are hundreds or thousands of metres away from the real track.
+//  They also freeze the position for several samples before and after each
+//  glitch, then snap back.  The pattern is always:
+//
+//      … good … | frozen | JUMP | frozen@wrong_place | JUMP_BACK | frozen | good …
+//
+//  Two filters are combined to catch all variants without touching good data:
+//
+//  Filter A – Track proximity (requires known reference points)
+//    A sample is suspect if it is farther than `maxDistFromTrackM` from every
+//    reference point (finish line + intermediates).  Reference points only need
+//    to loosely cover the circuit; a 300–500 m radius easily spans a typical
+//    racetrack.
+//
+//  Filter B – Step distance from the last accepted sample
+//    A sample is suspect if it is farther than `maxStepM` from the last sample
+//    that was accepted as good.  This catches "return jumps" (the snap-back
+//    from the wrong location) that may not be far from the track in absolute
+//    terms but are still physically impossible in one timestep.
+//
+//  A sample is marked BAD only when BOTH filters flag it (logical AND).
+//  This avoids false positives from:
+//    - GPS quantisation noise (~11 m hops at 4 d.p. precision): step > 0
+//      but distance from track is 0 → Filter A passes → sample kept.
+//    - Legitimate large steps when re-acquiring signal after a tunnel: step is
+//      large but the new position is plausibly on track → Filter A passes.
+//
+//  Bad segments are replaced by linear interpolation of lat/lon/alt between
+//  the last good sample before and the first good sample after the gap.
+//  The `interpolated` flag marks which samples were synthesised.
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace detail {
+
+/// Minimum haversine distance from (lat, lon) to any reference point.
+inline double minDistToRefs(
+    double lat, double lon,
+    const std::vector<double>& refLat,
+    const std::vector<double>& refLon) noexcept
+{
+    double minD = std::numeric_limits<double>::max();
+    for (std::size_t k = 0; k < refLat.size(); ++k)
+        minD = std::min(minD, haversine_meters(lat, lon, refLat[k], refLon[k]));
+    return minD;
+}
+
+/// Linear interpolation for a scalar.
+inline double lerp(double a, double b, double t) noexcept
+{
+    return a + t * (b - a);
+}
+
+} // namespace detail
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Output type
+// ─────────────────────────────────────────────────────────────────────────────
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Main cleaning function
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Clean a raw GPS track by removing samples that are implausibly far from the
+/// known circuit and linearly interpolating over the removed segments.
+///
+/// @param lat, lon, alt, ts     Parallel raw GPS vectors (same length, ts
+///                              must be monotonically non-decreasing).
+/// @param refLat, refLon        Reference points on the circuit (finish line
+///                              and/or intermediate checkpoints).  At least
+///                              one is required.  More is better — they define
+///                              the "valid region" for the track.
+/// @param maxDistFromTrackM     Filter A radius.  Samples farther than this
+///                              from EVERY reference point are suspect.
+///                              Rule of thumb: half the longest straight on the
+///                              circuit, or 300–500 m for a typical club track.
+/// @param maxStepM              Filter B step limit.  A sample farther than this
+///                              from the last *accepted* sample is also suspect
+///                              (catches impossible snap-back jumps).
+///                              Set to `std::numeric_limits<double>::max()` to
+///                              disable Filter B entirely.
+///
+/// @return  CleanedGPS with the same number of samples as the input.  Bad
+///          samples are linearly interpolated; the `interpolated` flag marks
+///          which ones were synthesised.
+
+
+void cleanGPSjumps(extracted_data &data, laps_data &laps, double maxDistFromTrackM, double maxStepM){
+        
+
+    // ── Pass 1: build bad[] mask ──────────────────────────────────────────────
+    // A sample is BAD if BOTH conditions hold:
+    //   A) it is far from all reference points (implausible location)
+    //   B) it is far from the last accepted sample (impossible step)
+    //
+    // Using AND means neither filter alone causes false positives.
+    
+    //Copy the data to be cleaned. I might not even need that
+    vector<double> lat = data.gps_lat;
+    vector<double> lon = data.gps_long;
+    vector<double> alt = data.gps_alt;
+    const std::size_t N = lat.size();
+    std::vector<bool> bad(N, false);
+    //Get all the track references 
+    std::vector<double> refLat, refLon;
+    refLat.push_back(laps.finish_lat); refLon.push_back(laps.finish_long);
+    for (size_t i = 0; i < laps.intermediate_lat.size(); i++){
+        refLat.push_back(laps.intermediate_lat[i]);
+        refLon.push_back(laps.intermediate_long[i]);
+    }
+
+    std::size_t lastGoodIdx = N; // sentinel: "no good sample seen yet"
+
+    for (std::size_t i = 0; i < N; ++i)
+    {
+        // ── Filter A: proximity to any known track point ──────────────────
+        const double distToTrack = detail::minDistToRefs(lat[i], lon[i], refLat, refLon);
+        const bool farFromTrack  = (distToTrack > maxDistFromTrackM);
+
+        // ── Filter B: step distance from last accepted sample ─────────────
+        bool impossibleStep = false;
+        if (lastGoodIdx < N) // we have a previous good sample
+        {
+            const double step = haversine_meters(lat[i], lon[i], lat[lastGoodIdx], lon[lastGoodIdx]);
+            impossibleStep = (step > maxStepM);
+        }
+
+        // ── Combined decision ─────────────────────────────────────────────
+        if (farFromTrack && (lastGoodIdx == N || impossibleStep))
+        {
+            // Both filters agree: this sample is a GPS glitch
+            bad[i] = true;
+        }
+        else
+        {
+            lastGoodIdx = i;
+        }
+    }
+
+    // ── Pass 2: interpolate over bad segments ─────────────────────────────────
+    // For each contiguous run of bad samples, linearly interpolate between the
+    // last good sample before the run and the first good sample after it.
+    // If the run touches the start or end of the file, we can only copy from
+    // the single valid neighbour (or leave the edge flagged).
+
+    
+    vector<bool> interpolated = std::vector<bool>(N, false);
+    int nBadRemoved  = 0, nGapsRemaining = 0;
+
+    std::size_t i = 0;
+    while (i < N)
+    {
+        if (!bad[i]) { ++i; continue; }
+
+        // Found the start of a bad run.  Find its end.
+        std::size_t runStart = i;
+        while (i < N && bad[i]) ++i;
+        std::size_t runEnd = i; // first good sample after the run (exclusive)
+
+        nBadRemoved += (runEnd - runStart);
+
+        // Find bounding good samples
+        // prevGood: last good sample index before the run
+        // nextGood: first good sample index after the run
+        const bool hasPrev = (runStart > 0);                // run doesn't touch file start
+        const bool hasNext = (runEnd   < N);                // run doesn't touch file end
+
+        if (hasPrev && hasNext)
+        {
+            // Standard case: interpolate between prevGood and nextGood
+            const std::size_t p = runStart - 1;
+            const std::size_t n = runEnd;
+            const double totalDt = data.gps_ts[n] - data.gps_ts[p];
+
+            for (std::size_t j = runStart; j < runEnd; ++j)
+            {
+                const double t = (totalDt > 0.0)
+                               ? (data.gps_ts[j] - data.gps_ts[p]) / totalDt
+                               : static_cast<double>(j - p) / static_cast<double>(n - p);
+
+                data.gps_lat[j]    = detail::lerp(data.gps_lat[p], data.gps_lat[n], t);
+                data.gps_long[j]   = detail::lerp(data.gps_long[p], data.gps_long[n], t);
+                data.gps_alt[j]    = detail::lerp(data.gps_alt[p], data.gps_alt[n], t);
+                interpolated[j] = true;
+            }
+
+        }
+        else if (hasPrev && !hasNext)
+        {
+            // Run touches the end: copy last good value forward
+            const std::size_t p = runStart - 1;
+            for (std::size_t j = runStart; j < runEnd; ++j)
+            {
+                data.gps_lat[j]   = data.gps_lat[p];
+                data.gps_long[j]  = data.gps_long[p];
+                data.gps_alt[j]   = data.gps_alt[p];
+                interpolated[j] = true;
+                ++nGapsRemaining;
+            }
+        }
+        else if (!hasPrev && hasNext)
+        {
+            // Run touches the start: copy first good value backward
+            const std::size_t n = runEnd;
+            for (std::size_t j = runStart; j < runEnd; ++j)
+            {
+                data.gps_lat[j]   = data.gps_lat[n];
+                data.gps_long[j]  = data.gps_long[n];
+                data.gps_alt[j]   = data.gps_alt[n];
+                interpolated[j] = true;
+                ++nGapsRemaining;
+            }
+        }
+        else
+        {
+            // Entire file is bad — nothing we can do.
+            ++nGapsRemaining;
+        }
+    }
+
+    cerr << "Number of corrected data point: " << nBadRemoved << "/" << N << endl;
+
 }

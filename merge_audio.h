@@ -18,5 +18,5 @@ extern "C" {
 
 using namespace std;
 
-void concatenate_audio_streams(const vector<string> &list_input, const string &output_filename);
+int concatenate_audio_streams(const vector<string> &list_input, const string &output_filename, double start_ts=0, double end_ts=-1);
 #endif //GOPROMOTO_MERGE_AUDIO_H
