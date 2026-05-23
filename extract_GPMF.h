@@ -41,7 +41,7 @@ void write_mp4_metadata(const string filename, extracted_data &data);
 void write_mp4_all_metadata(const string filename, extracted_data &data, size_t nb_data_points=0);
 void correct_gps_data(extracted_data &data);
 bool check_gps_data(extracted_data &data);
-bool create_gps_object(gps_data &gps, extracted_data &data, int nb_cols, int nb_rows);
+//bool create_gps_object(gps_data &gps, extracted_data &data, int nb_cols, int nb_rows);
 
 void convert_ms2kmh(extracted_data &data);
 

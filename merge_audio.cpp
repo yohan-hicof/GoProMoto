@@ -79,6 +79,13 @@ int concatenate_audio_streams(const vector<string> &list_input, const string &ou
     const int64_t   start_pts = av_rescale_q( (int64_t)(start_ts * AV_TIME_BASE), AV_TIME_BASE_Q, audio_in1->time_base);   // scale to audio ticks
     const int64_t   stop_pts = av_rescale_q( (int64_t)(end_ts * AV_TIME_BASE), AV_TIME_BASE_Q, audio_in1->time_base) - start_pts;
 
+    bool crop_start = start_ts < 0 ? false:true;
+    bool crop_end = end_ts < 0 ? false:true;
+
+    const int64_t end_pts_abs  = crop_end ? av_rescale_q((int64_t)(end_ts * AV_TIME_BASE), AV_TIME_BASE_Q, audio_in1->time_base) : INT64_MAX;
+    // Total output duration in audio_in1 time_base units (used to gate file 2+)
+    const int64_t target_duration = crop_end ? av_rescale_q((int64_t)((end_ts - (start_ts > 0 ? start_ts : 0.0)) * AV_TIME_BASE), AV_TIME_BASE_Q, audio_in1->time_base) : INT64_MAX;
+
     if (start_ts > 0.0)
         av_seek_frame(audio_fmt_ctx1, audio_stream_index1,  start_pts, AVSEEK_FLAG_BACKWARD);
 
@@ -87,16 +94,34 @@ int concatenate_audio_streams(const vector<string> &list_input, const string &ou
 
     // Copy packets from the first input file to the output file
     while (av_read_frame(audio_fmt_ctx1, pkt) >= 0) {
+        if (pkt->stream_index == audio_stream_index1) {
+            if (pkt->pts < start_pts && crop_start) { av_packet_unref(pkt); continue; }        
+            // ✅ Check absolute PTS against absolute end — BEFORE pts_offset subtraction
+            if (pkt->pts >= end_pts_abs && crop_end) { av_packet_unref(pkt); break; }
+            if (pts_offset == AV_NOPTS_VALUE)
+                pts_offset = pkt->pts;
+            pkt->pts -= pts_offset;
+            pkt->dts  = pkt->pts;
+            pkt->stream_index = out_stream->index;
+            frames_pts = pkt->pts + 1;
+            av_packet_rescale_ts(pkt, audio_in1->time_base, out_stream->time_base);
+            av_interleaved_write_frame(output_fmt_ctx, pkt);
+        }
+        av_packet_unref(pkt);
+    }
+
+#if 0
+    while (av_read_frame(audio_fmt_ctx1, pkt) >= 0) {
 
         if (pkt->stream_index == audio_stream_index1) {
-            if (pkt->pts < start_pts) {
+            if (pkt->pts < start_pts && crop_start) {
                 av_packet_unref(pkt);
                 continue;
             }
-            if (pkt->pts > stop_pts){
+            /*if (pkt->pts > stop_pts && crop_end){
                 av_packet_unref(pkt);
                 break;
-            }
+            }*/
 
             if (pts_offset == AV_NOPTS_VALUE)
                 pts_offset = pkt->pts;
@@ -113,6 +138,7 @@ int concatenate_audio_streams(const vector<string> &list_input, const string &ou
         }
         av_packet_unref(pkt);
     }
+#endif
 
     //Now do the following input files
     for (size_t i = 1; i < list_input.size(); i++){
@@ -130,13 +156,29 @@ int concatenate_audio_streams(const vector<string> &list_input, const string &ou
                 break;
             }
         }
+        while (av_read_frame(audio_fmt_ctx2, pkt) >= 0) {
+            if (pkt->stream_index == audio_stream_index2) {
+                pkt->stream_index = out_stream->index;
+                pkt->pts += frames_pts;
+                pkt->dts  = pkt->pts;
+
+                // ✅ frames_pts already accounts for all audio written so far
+                if (pkt->pts >= target_duration && crop_end) { av_packet_unref(pkt); break; }
+
+                last_frames_pts = pkt->pts + 1;
+                av_packet_rescale_ts(pkt, audio_fmt_ctx2->streams[audio_stream_index2]->time_base, out_stream->time_base);
+                av_interleaved_write_frame(output_fmt_ctx, pkt);
+            }
+            av_packet_unref(pkt);
+        }
+#if 0
         // Copy packets from the second input file to the output file
         while (av_read_frame(audio_fmt_ctx2, pkt) >= 0) {
             if (pkt->stream_index == audio_stream_index2) {
-                if (pkt->pts > stop_pts){
+                /*if (pkt->pts > stop_pts && crop_end){
                     av_packet_unref(pkt);
                     break;
-                }
+                }*/
                 pkt->stream_index = out_stream->index;
                 pkt->pts += frames_pts; // Increment pts to make it monotonic
                 pkt->dts = pkt->pts;
@@ -149,6 +191,7 @@ int concatenate_audio_streams(const vector<string> &list_input, const string &ou
             }
             av_packet_unref(pkt);
         }
+#endif
         frames_pts = last_frames_pts; //Needed to ensure coherent frame numbers.
     }
 

@@ -14,12 +14,13 @@ string time_to_string(double t){
     minutes = to_string(static_cast<int>(temp/60));
     seconds = to_string(temp - static_cast<int>(temp/60)*60);
     //Add leading zeros if needed
-    if (milli.size() == 1) milli = milli + "0";
+    if (milli.size() == 1) milli = "0" + milli;
+    //else if (milli.size() == 2) milli = "0" + milli;
     if (minutes.size() == 1) minutes = "0" + minutes;
     if (seconds.size() == 1) seconds = "0" + seconds;
     result = minutes + ":" + seconds + ":" + milli;
 
-    //cout << "From " << t << " to " << result << endl;
+    //cout << "From " << t << " to " << result << " (milli " << milli << ")" << endl;
     return result;
 }
 
