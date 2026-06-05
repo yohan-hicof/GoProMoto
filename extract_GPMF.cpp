@@ -33,6 +33,8 @@ int get_mp4_data(const char* filename, extracted_data &data) {
 	GPMF_ERR ret = GPMF_OK;
     uint32_t old_nb_frames = data.nb_frames;
 
+    GetStartTimestampFromMP4(filename, data);
+
     do{
 	ret = GetGPSMP4File(filename, data);
     } while (ret == GPMF_OK && --fuzzloopcount > 0);
@@ -299,6 +301,60 @@ void write_mp4_all_metadata(const string filename, extracted_data &data, size_t 
     file.close();
 
 }
+
+GPMF_ERR GetStartTimestampFromMP4(const char* filename, extracted_data& data){
+
+    size_t mp4handle = OpenMP4Source(filename, MOV_GPMF_TRAK_TYPE, MOV_GPMF_TRAK_SUBTYPE, 0);
+    if (mp4handle == 0) {
+        printf("error: %s is an invalid MP4/MOV or it has no GPMF data\n\n", filename);
+        return GPMF_ERROR_BAD_STRUCTURE;
+    }
+
+    GPMF_ERR ret = GPMF_ERROR_FIND;
+
+    uint32_t payloads = GetNumberPayloads(mp4handle);
+    size_t payloadres = 0;
+
+    for (uint32_t index = 0; index < payloads; index++) {
+        uint32_t payloadsize = GetPayloadSize(mp4handle, index);
+        payloadres = GetPayloadResource(mp4handle, payloadres, payloadsize);
+        uint32_t* payload = GetPayload(mp4handle, payloadres, index);
+        if (payload == NULL)
+            break;
+
+        GPMF_stream ms = { 0 };
+        if (GPMF_Init(&ms, payload, payloadsize) != GPMF_OK)
+            continue;
+
+        if (GPMF_OK == GPMF_FindNext(&ms, STR2FOURCC("GPSU"),
+                static_cast<GPMF_LEVELS>(GPMF_RECURSE_LEVELS | GPMF_TOLERANT)))
+        {
+            uint32_t len = GPMF_RawDataSize(&ms);
+            char buf[32] = {};
+            memcpy(buf, GPMF_RawData(&ms), std::min(len, (uint32_t)sizeof(buf) - 1));
+
+            // GPSU format: "YYMMDDHHMMSS.sss"
+            int YY, MM, DD, hh, mm, ss;
+            if (sscanf(buf, "%2d%2d%2d%2d%2d%2d", &YY, &MM, &DD, &hh, &mm, &ss) == 6) {
+                char result[32];
+                snprintf(result, sizeof(result), "20%02d-%02d-%02d %02d:%02d:%02d UTC",
+                         YY, MM, DD, hh, mm, ss);
+                data.start_ts = result;
+                ret = GPMF_OK;
+            }
+            GPMF_Free(&ms);
+            break; // Found what we need, stop
+        }
+
+        GPMF_Free(&ms);
+    }
+
+    if (payloadres) FreePayloadResource(mp4handle, payloadres);
+    CloseSource(mp4handle);
+
+    return ret;
+}
+
 
 GPMF_ERR GetGPSMP4File(const char* filename, extracted_data &data){
 	GPMF_ERR ret = GPMF_OK;

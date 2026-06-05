@@ -7,6 +7,10 @@ std::vector<double> gaussianSmooth(const std::vector<double>& data, double sigma
 std::vector<double> velocity(const std::vector<double>& p, const std::vector<double>& t);
 std::vector<double> acceleration(const std::vector<double>& p, const std::vector<double>& t);
 
-lean_data lean_estimator(const std::vector<double>& lat,  const std::vector<double>& lon, const std::vector<double>& alt,
-				         const std::vector<double>& timestamp, double smoothSigma=5.0);
+//lean_data lean_estimator(const std::vector<double>& lat,  const std::vector<double>& lon, const std::vector<double>& alt,
+//				         const std::vector<double>& timestamp, double smoothSigma=5.0);
+
+lean_data lean_estimator(const extracted_data& data, double smoothSigma=5.0);
+
+lean_data estimate_motion(const extracted_data& data, int smooth_hw = 5.0);
 

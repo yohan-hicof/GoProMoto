@@ -24,7 +24,7 @@ namespace HUD {
     double TRACK_CW  = 500.0;
     double TRACK_CH  = 500.0;
     double TRACK_CM  = 10.0;
-    double TRACK_POS  = 7.0;
+    double TRACK_POS  = 9.0;
 
     // Lap time (Bottom right) //This one evolve with time
     double LAP_CX  = 1000.0;
@@ -313,7 +313,7 @@ void create_track_hud(cv::Mat &canvas, extracted_data &data, gps_data &gps, laps
     //First, create the list of points for the track to overlay
     // 1. Bounding box in GPS space
     double min_lat = *std::min_element(data.gps_lat.begin(), data.gps_lat.end());
-    double max_lat = *std::max_element(data.gps_lat.begin(), data.gps_long.end());
+    double max_lat = *std::max_element(data.gps_lat.begin(), data.gps_lat.end());
     double min_lon = *std::min_element(data.gps_long.begin(), data.gps_long.end());
     double max_lon = *std::max_element(data.gps_long.begin(), data.gps_long.end());
     double min_x = DBL_MAX, min_y = DBL_MAX, max_x = 0, max_y = 0;
@@ -329,7 +329,7 @@ void create_track_hud(cv::Mat &canvas, extracted_data &data, gps_data &gps, laps
     double draw_w = TRACK_CW - 2 * TRACK_CM;
     double draw_h = TRACK_CH - 2 * TRACK_CM;
     double scale  = std::min(draw_w  / span_lon, draw_h  / span_lat);
-    
+        
     // 4. Project each point
     gps.track_pts.reserve(data.gps_lat.size());    
     for (size_t i = 0; i < data.gps_lat.size(); ++i) {
@@ -389,34 +389,49 @@ void create_track_hud(cv::Mat &canvas, extracted_data &data, gps_data &gps, laps
     }
     //Draw the POI
     cairo_move_to(cr, gps.track_finish_line.x, gps.track_finish_line.y);
-    cairo_set_source_rgba (cr, 0.8, 0.8, 0.8, 0.8);
+    cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, 1.0);
     cairo_arc(cr, gps.track_finish_line.x, gps.track_finish_line.y, TRACK_POS+3, 0.0, 2.0*M_PI);
-    cairo_set_source_rgba (cr, 0.0, 0.8, 0.0, 0.8);
+    cairo_fill(cr);
+    cairo_set_source_rgba (cr, 0.0, 1.0, 0.0, 0.8);
     cairo_arc(cr, gps.track_finish_line.x, gps.track_finish_line.y, TRACK_POS, 0.0, 2.0*M_PI);
     cairo_fill(cr);
 
     for (auto pt: gps.track_intermediates) {
         cairo_move_to(cr, pt.x, pt.y);
-        cairo_set_source_rgba (cr, 0.8, 0.8, 0.8, 0.8);
+        cairo_set_source_rgba (cr, 1.0, 1.0, 1.0, 1.0);
         cairo_arc(cr, pt.x, pt.y, TRACK_POS+3, 0.0, 2.0*M_PI);
-        cairo_set_source_rgba (cr, 0.8, 0.8, 0.0, 0.8);
+        cairo_fill(cr);
+        cairo_set_source_rgba (cr, 1.0, 1.0, 0.0, 1.0);
         cairo_arc(cr, pt.x, pt.y, TRACK_POS, 0.0, 2.0*M_PI);        
+        cairo_fill(cr);
     }
-    cairo_fill(cr);
+    
 
     //TODO Add the location of the intermediate points and the finish line.
     //TODO add the track name below and centered.
     
 
     //Add the track name with shade
+    double text_x = TRACK_CX + TRACK_CW/2, text_y = TRACK_CY + TRACK_CH - 2*TRACK_CM;
+    
     cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);    
     cairo_set_font_size(cr, 30.0);
     cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);    
-    centred_text(cr, TRACK_CX + TRACK_CW/2 +2, TRACK_CY + TRACK_CH - 2*TRACK_CM +2, gps.track_name.c_str());
+    centred_text(cr, text_x + 2, text_y + 2, gps.track_name.c_str());        
     cairo_stroke(cr);
     cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 1.0);    
-    centred_text(cr, TRACK_CX + TRACK_CW/2, TRACK_CY + TRACK_CH - 2*TRACK_CM, gps.track_name.c_str());
+    centred_text(cr, text_x, text_y, gps.track_name.c_str());    
     cairo_stroke(cr);
+
+    if (!data.start_ts.empty()){
+        cairo_set_font_size(cr, 20.0);
+        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
+        centred_text(cr, text_x + 2, text_y + 3*TRACK_CM + 2, data.start_ts.c_str());
+        cairo_stroke(cr);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 1.0);
+        centred_text(cr, text_x, text_y + 3*TRACK_CM, data.start_ts.c_str());
+        cairo_stroke(cr);
+    }    
 
     cairo_destroy(cr);
     cairo_surface_destroy(surface);
@@ -592,7 +607,7 @@ cv::Mat draw_track_hud(cv::Mat &static_layer, gps_data &gps, double ts){
     return canvas;
 }
 
-cv::Mat draw_track_hud_v2(cv::Mat &static_layer, gps_data &gps, laps_data &laps, double ts){
+cv::Mat draw_track_hud_intermediate(cv::Mat &static_layer, gps_data &gps, laps_data &laps, double ts){
     //This one, we draw on top of the track the distance since the last time we passed the finish line.
     //We can have two colors, one since the last intermediate, one for the part of track done
     using namespace HUD;
@@ -630,6 +645,107 @@ cv::Mat draw_track_hud_v2(cv::Mat &static_layer, gps_data &gps, laps_data &laps,
             }
         }
     }
+
+
+    //Now display our position on the track
+    cairo_move_to(cr, gps.track_pts[idx].x, gps.track_pts[idx].y);
+    cairo_set_source_rgba (cr, 0.8, 0.8, 0.8, 1.0);
+    cairo_arc(cr, gps.track_pts[idx].x, gps.track_pts[idx].y, TRACK_POS+3, 0.0, 2.0*M_PI);
+    cairo_fill(cr);
+    cairo_set_source_rgba (cr, 0, 0, 0.8, 1.0);
+    cairo_arc(cr, gps.track_pts[idx].x, gps.track_pts[idx].y, TRACK_POS, 0.0, 2.0*M_PI);
+    cairo_fill(cr);
+
+    cairo_destroy(cr);
+    cairo_surface_destroy(surface);
+
+    return canvas;
+
+
+}
+
+
+cv::Mat draw_track_hud_lean(cv::Mat &static_layer, gps_data &gps, laps_data &laps, lean_data &ld, double ts){
+    //This one, we draw on top of the track the lean angle at the different locations.
+    //
+    using namespace HUD;
+    cv::Mat canvas = static_layer.clone();
+    cairo_surface_t* surface = mat_to_cairo(canvas);
+    cairo_t* cr = cairo_create(surface);
+
+    //Get the index of our current position.
+#if 0
+    size_t idx = 0;
+    while(gps.track_ts[idx] < ts && idx < gps.track_ts.size()-1) idx++; 
+
+    for (auto lap: laps.list_laps){
+        if (ts <= lap.list_ts[0] || ts >= lap.list_ts.back()) //Not in this lap.
+            continue;
+
+        for (size_t i = 1; i < lap.list_ts.size(); i++){
+            //The color depends if we finish this part or not
+            if (ts >= lap.list_ts[i]) cairo_set_source_rgba (cr, 1.0, 0.0, 0.0, 1.0);
+            else cairo_set_source_rgba (cr, 0.0, 1.0, 0.0, 1.0);
+
+            //Find the location we should start drawing.
+            double start_ts = lap.list_ts[i-1], end_ts = min(ts, lap.list_ts[i]);
+            size_t idx_start = 0;
+            while(gps.track_ts[idx_start] < start_ts && idx_start < gps.track_ts.size()-1) idx_start++; 
+            size_t idx_end = idx_start;
+            while(gps.track_ts[idx_end] < end_ts && idx_end < gps.track_ts.size()-1) idx_end++; 
+            //Now draw over
+            if (idx_end-idx_start >= 2){
+                cairo_new_sub_path(cr);
+                cairo_set_line_width(cr, 5.0);
+                cairo_move_to(cr, gps.track_pts[idx_start].x, gps.track_pts[idx_start].y);
+                for (size_t i = idx_start+1; i < idx_end; ++i){
+                    double frac  = fabs(ld.lean_angle[i]/LEAN_MAX);
+                    double r = std::min(1.0, frac * 2.0);
+                    double g = std::min(1.0, 2.0 - frac * 2.0);
+                    cairo_set_source_rgba(cr, r, g, 0.05, 1.0);
+                    cairo_new_path(cr);                    
+                    cairo_move_to(cr, gps.track_pts[i-1].x, gps.track_pts[i-1].y);
+                    cairo_line_to(cr, gps.track_pts[i].x, gps.track_pts[i].y);
+                    cairo_stroke(cr);                    
+                }
+                //cairo_stroke(cr);   
+            }
+        }
+    }
+
+#endif
+    //Instead of just drawing between lap, draw since the last time we were at this point.
+    size_t idx = 251, start_idx = 0;
+    while(gps.track_ts[idx] < ts && idx < gps.track_ts.size()-1) idx++; 
+
+
+    for (size_t i = idx-250; i >= 1; --i){ // At 18Hz, 250 > 10s
+        //Compute the distance, if below 5 pixels, we stop
+        double d = pow(gps.track_pts[i].x - gps.track_pts[idx].x,2) + pow(gps.track_pts[i].y - gps.track_pts[idx].y,2);
+        if (d < 25) {
+            start_idx = i;
+            break;
+        }
+    }
+    //If we start at zero, we have a weird line because of the gps.track_pts[i-1]
+    if (start_idx == 0) start_idx++;
+
+    //cairo_new_path(cr);
+    cairo_set_line_width(cr, 5.0);
+    //cairo_move_to(cr, gps.track_pts[start_idx].x, gps.track_pts[start_idx].y);
+
+    //we draw over several time if needed, if this is to slow, I will need to improve.
+    for (size_t i = start_idx; i <= idx; i++){ 
+        double frac  = fabs(ld.lean_angle[i]/LEAN_MAX);
+        double r = std::min(1.0, frac * 2.0);
+        double g = std::min(1.0, 2.0 - frac * 2.0);
+        cairo_set_source_rgba(cr, r, g, 0.05, 1.0);
+        cairo_new_path(cr);                    
+        cairo_move_to(cr, gps.track_pts[i-1].x, gps.track_pts[i-1].y);
+        cairo_line_to(cr, gps.track_pts[i].x, gps.track_pts[i].y);
+        cairo_stroke(cr);  
+    }
+    
 
 
     //Now display our position on the track

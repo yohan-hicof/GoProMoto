@@ -35,11 +35,12 @@ struct speed_overlay{
 struct extracted_data{ //Init the rate to -1 to know when not init.
     double framerate = -1; //How many frames per second in the video.
     uint32_t nb_frames = 0; //Number of frames in the video.
+    string start_ts; //The begining of the GPS data, maybe to add to the video to know when was the video taken. Or for the output file
     //For acceleration, gyroscope and GPS: How many sample per secoond,
     //when does the samples star and end in the video, in frame (i.e. gps might not be at the beginning of the video.)
     double acclrate = -1, accl_start, accl_end;
     double gyrorate = -1, gyro_start, gyro_end;
-    double gpsrate = -1, gps_start, gps_end;
+    double gpsrate = -1, gps_start, gps_end;    
     std::vector<double> gps_lat, gps_long, gps_alt, gps_speed, gps_speed2, gps_ts;    
     string gps_lat_unit, gps_long_unit, gps_alt_unit, gps_speed_unit, gps_speed2_unit;
 
@@ -86,6 +87,8 @@ struct laps_data{
 
 struct lean_data{
     vector<double> lean_angle;
+    vector<double> acceleration;
+    std::vector<double> heading;
     vector<double> curvature;
     vector<double> speedKmh;
     vector<double> ts;

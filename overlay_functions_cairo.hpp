@@ -35,7 +35,8 @@ void create_track_hud(cv::Mat &canvas, extracted_data &data, gps_data &gps, laps
 cv::Mat draw_speed_hud(const cv::Mat& static_layer, double speed_kmh);
 cv::Mat draw_lean_hud(const cv::Mat& static_layer, double lean_deg);
 cv::Mat draw_track_hud(cv::Mat &static_layer, gps_data &gps, double ts);
-cv::Mat draw_track_hud_v2(cv::Mat &static_layer, gps_data &gps, laps_data &laps, double ts);
+cv::Mat draw_track_hud_intermediate(cv::Mat &static_layer, gps_data &gps, laps_data &laps, double ts);
+cv::Mat draw_track_hud_lean(cv::Mat &static_layer, gps_data &gps, laps_data &laps, lean_data &ld, double ts);
 cv::Mat draw_laptime_hud(cv::Mat &static_layer, laps_data &laps, double start_ts);
 
 static inline double deg2rad(double d) { return d * M_PI / 180.0; }

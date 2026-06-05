@@ -146,21 +146,18 @@ int process_several_videos(global_struct &gs){
             cerr << "Auto cropping from : " << gs.crop_start_ts << " to " << gs.crop_end_ts << endl;
         }
     }
-
-    //Create the object with the track overlay
-    /*if (!create_gps_object(gps, data, laps, frame_width/3, frame_height/3)){
-        gs.overlay_track = false;
-        overlay_speed = false;
-    }*/
-
+ 
     //Test the lean angle based only on the gps data
-    auto lean_result = lean_estimator(data.gps_lat, data.gps_long, data.gps_alt, data.gps_ts, 5.0);   
+    //auto lean_result = lean_estimator(data.gps_lat, data.gps_long, data.gps_alt, data.gps_ts, 5.0);
+    auto lean_result = lean_estimator(data, 5.0);
+
+    //auto lean_result = estimate_motion(data, 5.0);    
 
     convert_ms2kmh(data);
 
     //Create the cairo HUD
-    cv::Mat cairo_hud = create_static_hud(frame_width, frame_height);
-    if (overlay_speed) create_speed_hud(cairo_hud);
+    cv::Mat cairo_hud = create_static_hud(frame_width, frame_height);    
+    if (overlay_speed) create_speed_hud(cairo_hud);    
     if (overlay_speed) create_lean_hud(cairo_hud);
     if (gs.overlay_track) create_track_hud(cairo_hud, data, gps, laps);               
 
@@ -172,6 +169,8 @@ int process_several_videos(global_struct &gs){
         cerr << "Could not open the output video file for write: " << gs.temp_video << endl;
         return -1;
     }
+
+
     
     for (auto path: gs.paths_in){
         cap.open(path);
@@ -206,7 +205,8 @@ int process_several_videos(global_struct &gs){
             //Overlay the track.
             if (gs.overlay_track) {                
                 //overlay = draw_track_hud(overlay, gps, curr_ts);
-                overlay = draw_track_hud_v2(overlay, gps, laps, curr_ts);
+                //overlay = draw_track_hud_intermediate(overlay, gps, laps, curr_ts);
+                overlay = draw_track_hud_lean(overlay, gps, laps, lean_result, curr_ts);
             }
             //Overlay the speed meter
             if (overlay_speed) {                
@@ -219,7 +219,12 @@ int process_several_videos(global_struct &gs){
 
                 overlay = draw_speed_hud(overlay, s);                
                 overlay = draw_lean_hud(overlay, l);                
+
+                //Test the acceleration
+                //cv::putText(overlay, "Accel: " + to_string(lean_result.acceleration[idx]), cv::Point(500, 500), cv::FONT_HERSHEY_DUPLEX, 1.5, cv::Scalar(255,255,255,125), 2);
             }
+
+
 
             //Overlay the HUD
             overlay_hud(frame, overlay);
@@ -240,6 +245,12 @@ int process_several_videos(global_struct &gs){
     auto stop = high_resolution_clock::now();
     auto duration = duration_cast<seconds>(stop - start);
     cout << "Video processing time: " << duration.count() << " seconds" << endl;   
+
+    if (gs.path_output.empty()){//Generate the name from the track name and date.
+
+
+    }
+
     return 0;
 
 }
@@ -303,8 +314,7 @@ std::vector<std::string> getGoProParts(const std::string& fullPath) {
     // Basic validation
     if (filename.size() != 12 || filename.substr(0, 2) != "GH") {
         return parts;
-    }
-
+    }    
     // Extract parts:
     // GH010001.MP4
     //   ^^ -> part number
@@ -323,8 +333,7 @@ std::vector<std::string> getGoProParts(const std::string& fullPath) {
             << clipStr
             << extension;
 
-        fs::path candidate = dir / oss.str();
-
+        fs::path candidate = dir / oss.str();     
         if (fs::exists(candidate)) {
             parts.push_back(candidate.string());
         } else {
@@ -336,13 +345,77 @@ std::vector<std::string> getGoProParts(const std::string& fullPath) {
     return parts;
 }
 
-//TODO, instead of -i, use -p/-path, list all videos in a folder, select the first one, create all the videos.
+
+void parse_input_folder(const string &path_in, vector<vector<string> > &paths_in, vector<string> &paths_out){
+
+    //Take a folder, get all the first parts of the Gopro videoL GH01XXXX.MP4, then get all the following parts.
+    //Generate the output names.
+    //
+    vector<string> first_files;
+
+    cout << "Parsing " << path_in << " folder" << endl;
+    
+    for (const auto & entry : fs::directory_iterator(path_in)){        
+        //Get the full path, then the filename
+        fs::path entry_path(entry);
+        string p = entry.path();
+        string f = entry_path.filename().string();
+        string ext = entry_path.extension();
+        
+        if (f.substr(0,4) == "GH01" && (ext == ".MP4" || ext == ".mp4")){
+            //We keep this one, generate the output name at the same time
+            first_files.push_back(p);
+            string path_out = path_in + f.substr(0, f.size()-ext.size()) + "processed" + ext;
+            paths_out.push_back(path_out);
+        }
+    }
+
+    sort(first_files.begin(), first_files.end());
+    sort(paths_out.begin(), paths_out.end());
+
+    for (auto f: first_files){        
+        vector<string> curr = getGoProParts(f);
+        paths_in.push_back(curr);
+        cout << f << "->" << curr.size() << endl;
+    }
+
+
+}
+
+void process_full_folder(vector<vector<string> > &paths_in, vector<string> &paths_out, global_struct &gs){
+
+    assert(paths_in.size() == paths_out.size());
+
+    for (size_t i = 0; i < paths_in.size(); i++){
+        gs.paths_in = paths_in[i];
+        gs.path_output = paths_out[i];
+        cout << "Processing videos: \n";
+        for (auto input: gs.paths_in)
+            cout << "\t" << input << "\n";
+        cout << "Output: " << gs.path_output << endl;
+        //First create the overlay of the video in a temp file
+        int success = process_several_videos(gs);    
+        if (success >= 0){
+            //Second extract the audio from the input videos.
+            if (concatenate_audio_streams(gs.paths_in, gs.temp_audio, gs.crop_start_ts, gs.crop_end_ts) == 0)
+                //Finally concatenante both into the output file
+                concatenate_audio_video(gs.temp_video.c_str(), gs.temp_audio.c_str(), gs.path_output.c_str());
+            //Remove the temp files
+            std::remove(gs.temp_video.c_str());
+            std::remove(gs.temp_audio.c_str());
+        }
+    }
+
+}
+
 
 void parse_arguments(int argc, char* argv[]){
 
     global_struct gs;
     vector<string> arg;
     string path_all_videos;
+    vector<vector<string> > paths_in;
+    vector<string> paths_out;
         
     for (int i = 1; i < argc; i++){
         arg.emplace_back(argv[i]);
@@ -372,23 +445,42 @@ void parse_arguments(int argc, char* argv[]){
             //Limit the number of frame we extract from the video, useful for testing
             gs.limit_frame = stoi(arg[i+1]);            
         }
+        if (arg[i] == "-nb_thread" && i < arg.size()-1){
+            int nb_thread = stoi(arg[i+1]);
+            cout << "Limiting the number of threads: " << nb_thread << endl;
+            if (nb_thread >= 0)
+                cv::setNumThreads(nb_thread);
+        }
+
+            
 
     }
 
-    if(gs.paths_in.empty()){
-        cerr << "No input given." << endl;
-        show_help();
+    if (!path_all_videos.empty()){        
+        parse_input_folder(path_all_videos, paths_in, paths_out);
+        if (paths_in.empty()){
+            cout << "No video found in the given folder: " << path_all_videos << endl;
+            return;
+        }        
+        process_full_folder(paths_in, paths_out, gs);
         return;
     }
-    if(gs.path_output.empty()){
-        cerr << "No output given." << endl;
-        show_help();
-        return;
-    }
+    else{
+        if(gs.paths_in.empty()){
+            cerr << "No input given." << endl;
+            show_help();
+            return;
+        }
+        if(gs.path_output.empty()){
+            cerr << "No output given." << endl;
+            show_help();
+            return;
+        }
 
-    if (gs.paths_in.size() == 1){
-        cout << "Detect next video parts" << endl;
-        gs.paths_in = getGoProParts(gs.paths_in[0]);
+        if (gs.paths_in.size() == 1){
+            cout << "Detect next video parts" << endl;
+            gs.paths_in = getGoProParts(gs.paths_in[0]);
+        }
     }
 
     cout << "Processing videos: \n";

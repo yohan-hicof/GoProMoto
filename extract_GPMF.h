@@ -36,6 +36,7 @@ using namespace std;
 //I redefined it here to not move everything around...
 double haversine_meters(double lat1, double long1, double lat2, double long2);
 
+
 int get_mp4_data(const char* filename, extracted_data &data);
 void write_mp4_metadata(const string filename, extracted_data &data);
 void write_mp4_all_metadata(const string filename, extracted_data &data, size_t nb_data_points=0);
@@ -47,6 +48,8 @@ void convert_ms2kmh(extracted_data &data);
 
 void average_imu_data(extracted_data &data, int window_size=5);
 
+
+GPMF_ERR GetStartTimestampFromMP4(const char* filename, extracted_data& data);
 GPMF_ERR GetGPSMP4File(const char* filename, extracted_data &data);
 GPMF_ERR GetACCLMP4File(const char* filename, extracted_data &data);
 GPMF_ERR GetGYROMP4File(const char* filename, extracted_data &data);
