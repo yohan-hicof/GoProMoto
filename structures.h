@@ -103,11 +103,19 @@ struct global_struct{
     string temp_audio = "./temp_audio.aac";
     bool overlay_track = true;
     string path_tracks;
-    bool auto_crop = false;
+    bool time_only = false; //If true, do not process the video, just display the lap times.
+    bool auto_crop = false; // Automatically crop around the beginning of the first lap and end of the last one.
+    bool best_lap = false; // Only keep the best lap
     double crop_start_ts = 0.0;
     double crop_end_ts = 0.0;
     double crop_shift_ts = 5.0;
     uint32_t limit_frame = INT_MAX;
+
+    //Allow to send back the data to the main function.
+    extracted_data data;
+    gps_data gps;
+    laps_data laps;
+
 };
 
 #endif

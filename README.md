@@ -1,27 +1,35 @@
-I have to find a way to compute the lean angle of the motorbike, also if possible, acceleration and brake.
+This software takes gopro video input, and generate the overlay for video of motorcycle on racetrack.
+It does the following overlays:
+ - Current speed bottom left.
+ - Current lean angle bottom left, right of the speed.
+ - Lap time, current, previous best. Bottom right.
+ - Tracks display, current position, track name, video time, lean angle. Top right.
 
-So far, I have a structure with all the data extracted from the gopro video:
-struct extracted_data{ //Init the rate to -1 to know when not init.
-    double framerate = -1; //How many frames per second in the video.
-    uint32_t nb_frames = 0; //Number of frames in the video.    
-    double acclrate = -1, accl_start, accl_end;
-    double gyrorate = -1, gyro_start, gyro_end;
-    double gpsrate = -1, gps_start, gps_end;
-    std::vector<double> gps_lat, gps_long, gps_alt, gps_speed, gps_speed2;
-    string gps_lat_unit, gps_long_unit, gps_alt_unit, gps_speed_unit, gps_speed2_unit;
+This software has a few dependencies.
+ - gpmf parser: https://github.com/gopro/gpmf-parser, it is included here as I modified it a bit.
+ - Opencv, the main library to read/write the video.
+ - ffmpeg, to read the video in the background for opencv.
+ - cairo, to draw over the opencv video frames. Could be done with opencv, but cairo is much more powerfull for that.
 
-    std::vector<double> accl_x, accl_y, accl_z;
-    string accl_x_unit, accl_y_unit, accl_z_unit;
+The software is under MIT license.
 
-    std::vector<double> gyro_x, gyro_y, gyro_z;
-    string gyro_x_unit, gyro_y_unit, gyro_z_unit;
+The provided cmake should allow to compile under any OS, but I only tested it with Ubuntu.
 
-};
+The options are the following
+ - -i /path/to/video.mp4: The path to the first video. If the video is with the GoPro format, the software will find the subsequent files. If several -i, will just process them in given order, producing a single output.
+ - -o /path/to/output.mp4: The path to the output video.
+ - -path (-p) /path/to/folder: Will process all the videos in the given folder. For GoPro, find the subsequent videos. Generate the output according to the track name and date.
+ - -t /path/to/tracks.csv: A file containing the tracks informations: Name, starting line position (GPS), intermediate positions.
+ - -auto_crop (-ac): Will automatically crop around the full lap in the video. If no lap found, will leave the video as is.
+ - -best_lap (-bl): Will only display the best lap of the video. The time of previous lap is still displayed.
+ - -time_only (-to): Do not process the video and only display the computed lap time.
 
-Using that, I should be able to compute the lean angle of the motorcycle, and its braking/acceleration.
-I have the following assumpution:
- - The camera is aligned with the bike direction, facing forward.
- - I can that the bike is straight on the straight line, i.e. when the bike is at its fastest. I could do that once per turn.
- - The lean angle is probably lower than 60 degree, except for accident.
- - I should probably not use first few seconds of the video because the bike might be on the stand.
- - I should use whole dataset to have the best precision, then compute for each time point.
+
+TODO
+ - Add hardcoded tracks.
+ - Find a way to have different track configuration (ADR, Ales)
+ - Add acceleration/braking UID
+ - Change the track to a json files. Easier to maintain and add functionalities.
+ - Add a proper way to deal with options.
+
+

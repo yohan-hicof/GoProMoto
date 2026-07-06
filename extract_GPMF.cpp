@@ -364,6 +364,8 @@ GPMF_ERR GetGPSMP4File(const char* filename, extracted_data &data){
 	uint32_t payloadsize = 0;
 	size_t payloadres = 0;
 	size_t mp4handle = OpenMP4Source(filename, MOV_GPMF_TRAK_TYPE, MOV_GPMF_TRAK_SUBTYPE, 0);
+    double last_ts = 0.0; 
+    if (data.gps_ts.size() != 0) last_ts = data.gps_ts.back();
 
 	if (mp4handle == 0){
 		printf("error: %s is an invalid MP4/MOV or it has no GPMF data\n\n", filename);
@@ -471,7 +473,8 @@ GPMF_ERR GetGPSMP4File(const char* filename, extracted_data &data){
 							data.gps_speed.emplace_back(*ptr++);
 							data.gps_speed2.emplace_back(*ptr++);
 							
-							data.gps_ts.emplace_back(in+i*(out-in)/samples);
+							data.gps_ts.emplace_back(in+i*(out-in)/samples + last_ts);
+                            
 							/*printf("--%.3f%s, ", data.gps_lat.back(), units[0 % unit_samples]);
 							printf("--%.3f%s, ", data.gps_long.back(), units[1 % unit_samples]);
 							printf("--%.3f%s, ", data.gps_alt.back(), units[2 % unit_samples]);
